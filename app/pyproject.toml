@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whatsapp-bot"
+version = "1.0.0"
+description = "Self-hosted WhatsApp bot: FastAPI ingest, RQ worker, pluggable handler pipeline"
+requires-python = ">=3.11"
+license = "MIT"
+
+dependencies = [
+    "fastapi~=0.140.0",
+    "uvicorn[standard]~=0.51.0",
+    "pydantic~=2.13.4",
+    "pydantic-settings~=2.14.0",
+    "redis~=8.0.1",
+    "rq~=2.10.0",
+    "structlog~=26.1.0",
+    "httpx~=0.28.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest~=9.1.0",
+    # [lua] pulls lupa, needed so the rate limiter's Lua script runs in tests
+    "fakeredis[lua]~=2.37.0",
+    # starlette's TestClient now wants httpx2; the app itself still uses httpx
+    "httpx2~=2.9.0",
+    "ruff~=0.16.0",
+    "mypy~=2.3.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["whatsapp_bot*"]
+
+# -----------------------------------------------------------------------------
+# ruff
+# -----------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "SIM",  # simplify
+    "C4",   # comprehensions
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "B008",  # FastAPI dependency injection relies on calls in argument defaults
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+# -----------------------------------------------------------------------------
+# mypy — strict sur le code applicatif, souple sur les tests
+# -----------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_untyped_decorators = false
+
+# -----------------------------------------------------------------------------
+# pytest
+# -----------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+filterwarnings = ["error"]
