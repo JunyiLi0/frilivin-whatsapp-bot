@@ -11,20 +11,11 @@ from __future__ import annotations
 from whatsapp_bot.config import Settings, get_settings
 from whatsapp_bot.models import InboundMessage, Outbound
 from whatsapp_bot.processing.base import Context, Handler
+from whatsapp_bot.processing.jids import display_name
 
 RELAY_COUNTER_KEY = "relay:count"
 
-
-def display_name(jid: str) -> str:
-    """``33612345678@s.whatsapp.net`` → ``+33612345678``.
-
-    Group ids are numeric too, so they are left alone rather than being
-    dressed up as phone numbers.
-    """
-    local = jid.split("@", 1)[0].split(":", 1)[0]
-    if jid.endswith("@g.us") or not local.isdigit():
-        return local
-    return f"+{local}"
+__all__ = ["RELAY_COUNTER_KEY", "GroupRelayHandler", "display_name"]
 
 
 class GroupRelayHandler(Handler):

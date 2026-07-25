@@ -58,6 +58,15 @@ class Settings(BaseSettings):
     relay_keywords: str = ""
     relay_target_jids: str = ""
 
+    # --- broadcast handler ---
+    broadcast_enabled: bool = True
+    broadcast_command: str = "!envoi"
+    # Empty means nobody may broadcast, which disables the handler entirely.
+    broadcast_admin_jids: str = ""
+    broadcast_max_recipients: int = 25
+    # "nord=120363000000000000@g.us,sud=33612345678"
+    broadcast_aliases: str = ""
+
     @property
     def retry_intervals(self) -> list[int]:
         """Backoff, in seconds, between worker retries."""
@@ -71,6 +80,21 @@ class Settings(BaseSettings):
     @property
     def relay_target_list(self) -> list[str]:
         return _split_csv(self.relay_target_jids)
+
+    @property
+    def broadcast_admin_list(self) -> list[str]:
+        """Raw allowlist entries — the handler canonicalises them."""
+        return _split_csv(self.broadcast_admin_jids)
+
+    @property
+    def broadcast_alias_map(self) -> dict[str, str]:
+        """``name=target`` pairs, keyed by lowercase name."""
+        mapping: dict[str, str] = {}
+        for item in _split_csv(self.broadcast_aliases):
+            name, separator, target = item.partition("=")
+            if separator and name.strip() and target.strip():
+                mapping[name.strip().lower()] = target.strip()
+        return mapping
 
 
 @lru_cache(maxsize=1)

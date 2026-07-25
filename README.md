@@ -19,12 +19,13 @@ quoi en faire, et le bot répond ou relaie vers des groupes.
 3. [Déploiement sur Oracle Cloud ARM64](#déploiement-sur-oracle-cloud-arm64)
 4. [Scanner le QR code](#scanner-le-qr-code)
 5. [Trouver les JID des groupes](#trouver-les-jid-des-groupes)
-6. [Ajouter un comportement](#ajouter-un-comportement)
-7. [Configuration](#configuration)
-8. [Exploitation](#exploitation)
-9. [Développement et tests](#développement-et-tests)
-10. [Dépannage](#dépannage)
-11. [Limites connues](#limites-connues)
+6. [Diffuser une liste avec `!envoi`](#diffuser-une-liste-avec-envoi)
+7. [Ajouter un comportement](#ajouter-un-comportement)
+8. [Configuration](#configuration)
+9. [Exploitation](#exploitation)
+10. [Développement et tests](#développement-et-tests)
+11. [Dépannage](#dépannage)
+12. [Limites connues](#limites-connues)
 
 ---
 
@@ -235,6 +236,85 @@ puis `docker compose up -d worker` pour recharger.
 
 ---
 
+## Diffuser une liste avec `!envoi`
+
+Le comportement principal du bot : **un destinataire par ligne, chacun avec son propre
+message**. Vous écrivez au numéro dédié, depuis votre téléphone habituel :
+
+```
+!envoi
+33766793050; Bonjour, la réunion est déplacée à 15 h
+33784828374; Peux-tu confirmer ta présence ?
+120363000000000000@g.us; Compte rendu envoyé par mail
+nord; Message pour l'alias « nord »
+```
+
+Le bot répond en citant votre demande :
+
+```
+📤 4 message(s) en file d'envoi :
+  ✅ +33766793050
+  ✅ +33784828374
+  ✅ 120363000000000000
+  ✅ 120363000000000042
+
+⏳ Chaque message part avec 2-8 s d'écart.
+```
+
+### Activer la commande
+
+**Sans allowlist, le handler est désactivé** : renseignez qui a le droit de diffuser,
+sinon n'importe quel inconnu écrivant au numéro disposerait d'un relais de diffusion.
+
+```dotenv
+BROADCAST_ADMIN_JIDS=33612345678,33698765432
+BROADCAST_ALIASES=nord=120363000000000000@g.us,sud=120363000000000042@g.us
+```
+
+puis `docker compose up -d worker`. Un expéditeur non autorisé n'obtient **aucune
+réponse** : la tentative est seulement journalisée (`broadcast_refused`).
+
+### Format accepté
+
+| Écriture du destinataire | Résultat |
+| --- | --- |
+| `33766793050`, `+33 7 66 79 30 50`, `07-66-79-30-50` | message privé |
+| `120363000000000000` ou `120363000000000000@g.us` | groupe |
+| `nord` | alias, résolu via `BROADCAST_ALIASES` ou la table `state` |
+
+- Le séparateur est le **premier** `;` de la ligne : le message peut en contenir d'autres.
+- Ligne vide ignorée, ligne commençant par `#` traitée comme un commentaire.
+- La liste peut commencer sur la ligne de la commande (`!envoi 33766793050; Salut`).
+- Une ligne illisible n'annule pas les autres : elle est listée dans l'accusé, avec son
+  numéro de ligne.
+- `!envoi` seul affiche un mémo d'utilisation.
+
+### Ajouter un alias sans redémarrer
+
+```bash
+docker compose exec api python -c "
+from whatsapp_bot import db
+with db.session('/data/bot.db') as c:
+    db.set_state(c, 'broadcast:alias:nord', '120363000000000000@g.us')"
+```
+
+Les alias de la table `state` sont prioritaires sur ceux de `.env`.
+
+### Le plafond, et pourquoi il existe
+
+`BROADCAST_MAX_RECIPIENTS` (défaut `25`) limite le nombre de destinataires par envoi.
+**Au-delà, rien n'est envoyé** — le lot entier est refusé et l'accusé vous invite à
+découper votre liste. C'est volontaire : un envoi partiel serait pire, car le rate
+limiter global consomme son quota **au moment de la mise en file**, et les envois refusés
+sont abandonnés avec un simple avertissement dans les logs.
+
+Pour la même raison, le plafond est automatiquement borné à `RATE_LIMIT_PER_MINUTE - 1`
+(l'accusé de réception consomme lui aussi un envoi). Si vous montez
+`BROADCAST_MAX_RECIPIENTS`, montez `RATE_LIMIT_PER_MINUTE` avec — et gardez en tête que
+le bridge espace les envois de 2 à 8 s, soit environ 12 messages par minute en pratique.
+
+---
+
 ## Ajouter un comportement
 
 Trois étapes, aucun enregistrement manuel : le registre découvre les handlers tout seul.
@@ -314,6 +394,7 @@ docker compose logs worker | grep handlers_loaded
 | Priorité | Rôle | Exemple fourni |
 | --- | --- | --- |
 | 10 | Commandes explicites | `PingHandler` (`!ping`) |
+| 20 | Commandes d'opérateur | `BroadcastHandler` (`!envoi`) |
 | 50 | Routage / relais | `GroupRelayHandler` |
 | 1000 | Observation, jamais de réponse | `FallbackLogHandler` |
 
@@ -340,6 +421,10 @@ Toutes les variables sont dans `.env` (modèle commenté : `.env.example`).
 | `RELAY_KEYWORDS` | `urgent,alerte` | Mots-clés déclenchant le relais |
 | `RELAY_TARGET_JIDS` | *(vide)* | Groupes cibles ; vide = handler désactivé |
 | `PING_ENABLED` | `true` | Active `!ping` |
+| `BROADCAST_ADMIN_JIDS` | *(vide)* | Qui peut diffuser ; vide = handler désactivé |
+| `BROADCAST_COMMAND` | `!envoi` | Commande déclenchant une diffusion |
+| `BROADCAST_MAX_RECIPIENTS` | `25` | Destinataires max ; borné à `RATE_LIMIT_PER_MINUTE - 1` |
+| `BROADCAST_ALIASES` | *(vide)* | Alias `nom=cible`, séparés par des virgules |
 
 Le **limiteur de débit est global** : les 500 envois/jour et 30/minute sont partagés par
 tous les handlers, et comptés dans Redis de façon atomique. Un envoi refusé est

@@ -88,6 +88,20 @@ def test_relay_handler_appears_once_configured(monkeypatch: pytest.MonkeyPatch) 
     assert "GroupRelayHandler" in names(discover_handlers(DEFAULT_PACKAGE))
 
 
+def test_broadcast_handler_disables_itself_without_admins() -> None:
+    """No BROADCAST_ADMIN_JIDS configured: nobody may broadcast."""
+    assert "BroadcastHandler" not in names(discover_handlers(DEFAULT_PACKAGE))
+
+
+def test_broadcast_handler_appears_once_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    from whatsapp_bot.config import get_settings
+
+    monkeypatch.setenv("BROADCAST_ADMIN_JIDS", "33612345678")
+    get_settings.cache_clear()
+
+    assert "BroadcastHandler" in names(discover_handlers(DEFAULT_PACKAGE))
+
+
 def test_get_handlers_is_cached() -> None:
     first = get_handlers()
     assert get_handlers() is first

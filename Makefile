@@ -1,7 +1,7 @@
 # Raccourcis d'exploitation. `make` seul affiche l'aide.
 .DEFAULT_GOAL := help
 .PHONY: help build up down restart ps logs logs-bridge qr health groups smoke \
-        db dlq dlq-requeue backup install test lint fmt typecheck check \
+        smoke-broadcast db dlq dlq-requeue backup install test lint fmt typecheck check \
         node-install node-test node-lint
 
 # Charge .env s'il existe, pour disposer de BOT_TOKEN et API_PORT dans les cibles.
@@ -63,6 +63,20 @@ smoke: ## Injecte un faux message « !ping » dans le pipeline
 		-H 'Content-Type: application/json' \
 		-d "{\"id\":\"$$id\",\"from\":\"33600000000@s.whatsapp.net\",\"chat_jid\":\"33600000000@s.whatsapp.net\",\"is_group\":false,\"timestamp\":$$(date +%s),\"type\":\"text\",\"text\":\"!ping\",\"quoted_id\":null}" \
 		| python3 -m json.tool
+
+smoke-broadcast: ## Injecte une diffusion « !envoi » de 2 lignes (ADMIN=<jid|numéro>)
+	@admin="$(or $(ADMIN),$(firstword $(subst $(,), ,$(BROADCAST_ADMIN_JIDS))))"; \
+	if [ -z "$$admin" ]; then \
+		echo "Renseignez BROADCAST_ADMIN_JIDS dans .env, ou passez ADMIN=33612345678"; exit 1; \
+	fi; \
+	case "$$admin" in *@*) ;; *) admin="$$admin@s.whatsapp.net";; esac; \
+	id="smoke-bc-$$(date +%s)"; \
+	echo "→ diffusion $$id au nom de $$admin"; \
+	curl -fsS -X POST $(API)/webhook $(AUTH) \
+		-H 'Content-Type: application/json' \
+		-d "{\"id\":\"$$id\",\"from\":\"$$admin\",\"chat_jid\":\"$$admin\",\"is_group\":false,\"timestamp\":$$(date +%s),\"type\":\"text\",\"text\":\"!envoi\\n33766793050; Hello this is a message\\n33784828374; Another one\",\"quoted_id\":null}" \
+		| python3 -m json.tool
+	@echo "→ vérifiez le résultat avec :  make db"
 
 db: ## Affiche les 20 derniers messages en base
 	$(COMPOSE) exec -T api python -m whatsapp_bot.tools.dump_messages
