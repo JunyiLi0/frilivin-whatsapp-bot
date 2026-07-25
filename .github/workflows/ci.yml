@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: ruff + mypy + pytest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: app/pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: ruff check
+        run: ruff check .
+
+      - name: ruff format
+        run: ruff format --check .
+
+      - name: mypy
+        run: mypy whatsapp_bot
+
+      - name: pytest
+        run: pytest -q
+
+  node:
+    name: eslint + node:test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bridge
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: bridge/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: eslint
+        run: npx eslint .
+
+      - name: node --test
+        run: npm test
+
+  docker-arm64:
+    name: build linux/arm64 images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # The target is Oracle Ampere A1, so the images have to build for arm64.
+      # CI runners are x86_64, hence the emulation layer.
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build app image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./app
+          platforms: linux/arm64
+          push: false
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+
+      - name: Build bridge image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./bridge
+          platforms: linux/arm64
+          push: false
+          cache-from: type=gha,scope=bridge
+          cache-to: type=gha,mode=max,scope=bridge
+
+  compose:
+    name: docker compose config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate compose file
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
