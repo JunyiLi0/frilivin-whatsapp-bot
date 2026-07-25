@@ -1,0 +1,1 @@
+"""FastAPI ingest service."""
