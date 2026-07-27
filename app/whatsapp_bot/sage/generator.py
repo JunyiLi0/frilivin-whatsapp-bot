@@ -24,6 +24,19 @@ from pathlib import Path
 #  CONFIGURATION  (à ajuster selon ton dossier Sage)
 # ============================================================
 SEUIL_CLIENT = 0.60
+# Nombre minimal de mots au dénominateur du score de recouvrement client.
+# Voir score_client() : garde-fou contre les fiches Sage à un seul mot.
+MIN_MOTS_RECOUVREMENT = 2
+
+# Formes juridiques et mots de liaison : présents dans un nom d'entreprise sur
+# deux, ils ne distinguent rien. Les compter dans le recouvrement rattachait
+# « ENTREPRISE ... SARL » à « KUBERA SARL » sur ce seul mot commun.
+MOTS_VIDES = {
+    "SARL", "SAS", "SASU", "EURL", "SA", "SNC", "SCI", "SCOP", "SELARL", "GIE",
+    "ETS", "ETABLISSEMENTS", "STE", "SOCIETE", "CIE", "COMPAGNIE", "GROUPE",
+    "LTD", "LLC", "INC", "GMBH", "BV", "SPA", "SRL", "NV", "PLC", "SPRL", "BVBA", "AG", "OY", "AB",
+    "ET", "DE", "DU", "DES", "LA", "LE", "LES", "AU", "AUX",
+}
 GARDER_COULEUR_DANS_CODE = False
 TYPE_PIECE        = "Facture"
 VALIDEE           = "Non"            # brouillons à relire dans Sage ; passe à "Oui" si besoin
@@ -171,14 +184,19 @@ def norm_nom(s):
     s = re.sub(r"[^A-Z0-9 &]", " ", s)
     return re.sub(r"\s+", " ", s).strip()
 
-def mots(s): return [m for m in norm_nom(s).split(" ") if len(m) >= 2]
+def mots(s): return [m for m in norm_nom(s).split(" ") if len(m) >= 2 and m not in MOTS_VIDES]
 
 def score_client(a, b):
     na, nb = norm_nom(a), norm_nom(b)
     if not na or not nb: return 0.0
     seq = difflib.SequenceMatcher(None, na, nb).ratio()
     ma, mb = set(mots(a)), set(mots(b))
-    rec = len(ma & mb) / min(len(ma), len(mb)) if ma and mb else 0.0
+    # Le dénominateur est plancherné à MIN_MOTS_RECOUVREMENT : sans ça, une fiche
+    # Sage tenant en UN mot obtient 1.0 dès qu'un seul mot est commun, et toute
+    # commande contenant ce mot lui est rattachée (« ...QUI N EXISTE PAS SARL »
+    # -> fiche « PAS »). Les correspondances légitimes sur nom court passent par
+    # seq / debut, pas par ce recouvrement.
+    rec = len(ma & mb) / max(MIN_MOTS_RECOUVREMENT, min(len(ma), len(mb))) if ma and mb else 0.0
     debut = 0.85 if (na.startswith(nb) or nb.startswith(na)) else 0.0
     return max(seq, rec, debut)
 

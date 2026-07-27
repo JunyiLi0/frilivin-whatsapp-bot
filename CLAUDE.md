@@ -116,6 +116,16 @@ envoyé n'a aucune importance ; seul le numéro *à l'intérieur* compte.
   au lieu de 2 s, décidé dans `api/main.py` sur `msg.has_file`. Mesuré sur les
   vrais fichiers : 528 ms à froid, 226 ms cache chaud.
 - Échec → réponse avec la raison, jamais de silence.
+- **Client/article introuvable n'interrompt rien** : valeurs de repli (code article
+  nettoyé + TVA 20 %, code client vide) et avertissements dans la légende.
+- **Le rapprochement client est flou et peut se tromper de compte.** Deux garde-fous
+  ajoutés dans `generator.py::score_client` après avoir constaté qu'une fiche Sage
+  d'un seul mot obtenait 1.000 sur toute commande contenant ce mot (`« ...QUI N
+  EXISTE PAS SARL »` → fiche `PAS`) : dénominateur du recouvrement plancherné à
+  `MIN_MOTS_RECOUVREMENT`, et `MOTS_VIDES` écarte les formes juridiques. Vérifié :
+  400/400 clients réels se retrouvent eux-mêmes. La légende affiche le code, le nom
+  et le score pour rendre un mauvais rattachement visible ; `SAGE_CLIENT_MATCH_THRESHOLD`
+  règle l'exigence (le score dépasse 1 quand les bonus CP/ville s'appliquent).
 
 ## 6. Commandes
 
@@ -131,7 +141,7 @@ make dlq            # dead-letter queue
 make backup         # wa_session + base
 ```
 
-`make check` = ruff + ruff format + mypy strict + pytest (**184**) + eslint +
+`make check` = ruff + ruff format + mypy strict + pytest (**195**) + eslint +
 `node --test` (**72**). Tout doit rester vert.
 
 Attention : `make health` interroge `127.0.0.1`. Depuis un poste local il faut un

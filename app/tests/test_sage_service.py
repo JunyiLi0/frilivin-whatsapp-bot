@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from sage_fixtures import write_references, write_xlsx
 
-from whatsapp_bot.sage import service
+from whatsapp_bot.sage import generator, service
 from whatsapp_bot.sage.service import SageError, generate, order_suffix
 
 
@@ -157,6 +157,87 @@ class TestRefusals:
             )
 
 
+class TestClientMatching:
+    def test_reports_the_customer_an_invoice_was_attached_to(
+        self, tmp_path: Path, refs: tuple[Path, Path]
+    ) -> None:
+        clients, articles = refs
+        source = write_xlsx(tmp_path / "cmd.xlsx")
+
+        result = generate(
+            source, clients_path=clients, articles_path=articles, output_dir=tmp_path / "out"
+        )
+
+        assert len(result.clients) == 1
+        match = result.clients[0]
+        assert match.attached
+        assert match.code == "CL0295"
+        assert "CL0295" in match.describe()
+
+    def test_reports_an_unattached_customer(self, tmp_path: Path, refs: tuple[Path, Path]) -> None:
+        clients, articles = refs
+        rows = [
+            ["TaylormanCommande", ""],
+            ["Numéro", "1104111"],
+            ["Client", "PARFAIT INCONNU"],
+            ["Adresse", "1 rue nulle part 99999 ailleurs"],
+            ["N°", "Référence", "Prix", "Quantité", "Colisage"],
+            ["1", "# M631-1", "5.00", "1", "1"],
+        ]
+        source = write_xlsx(tmp_path / "inconnu.xlsx", rows)
+
+        result = generate(
+            source, clients_path=clients, articles_path=articles, output_dir=tmp_path / "out"
+        )
+
+        match = result.clients[0]
+        assert not match.attached
+        assert match.code is None
+        assert "non rattaché" in match.describe()
+
+    def test_a_single_shared_word_no_longer_attaches(self) -> None:
+        """A one-word Sage record used to score a perfect 1.0 on any order
+        containing that word, silently invoicing the wrong customer."""
+        assert generator.score_client("ENTREPRISE QUI N EXISTE PAS SARL", "PAS") < 0.60
+        assert generator.score_client("BOULANGERIE DU COIN", "DU") < 0.60
+
+    @pytest.mark.parametrize(
+        ("order", "record"),
+        [
+            ("Bost", "SAS BOST"),
+            ("CUBIK", "CUBIK"),
+            ("CUBIK SARL", "CUBIK"),
+            ("TEXAS DIFFUSION", "TEXAS DIFFUSION"),
+        ],
+    )
+    def test_genuine_matches_survive(self, order: str, record: str) -> None:
+        """Short legitimate names match through the sequence/prefix score."""
+        assert generator.score_client(order, record) >= 0.60
+
+
+class TestWarnings:
+    def test_detail_lines_are_kept(self, tmp_path: Path, refs: tuple[Path, Path]) -> None:
+        """The heading alone says "1 article missing" without saying which."""
+        clients, articles = refs
+        rows = [
+            ["TaylormanCommande", ""],
+            ["Numéro", "1104222"],
+            ["Client", "SAS BOST"],
+            ["Adresse", "1 cour ga 75002 paris FRANCE"],
+            ["N°", "Référence", "Prix", "Quantité", "Colisage"],
+            ["1", "# ZZ999999-1 PANTALON", "5.00", "1", "1"],
+        ]
+        source = write_xlsx(tmp_path / "article.xlsx", rows)
+
+        result = generate(
+            source, clients_path=clients, articles_path=articles, output_dir=tmp_path / "out"
+        )
+
+        joined = "\n".join(result.warnings)
+        assert "ARTICLES NON TROUVÉS" in joined
+        assert "ZZ999999" in joined, "le détail doit accompagner l'en-tête"
+
+
 class TestCache:
     def test_reference_indexes_are_reused(self, tmp_path: Path, refs: tuple[Path, Path]) -> None:
         clients, _ = refs
@@ -179,3 +260,33 @@ class TestCache:
 
         assert second is not first
         assert [c["code"] for c in second] == ["CL0999"]
+
+
+class TestThreshold:
+    def test_a_stricter_threshold_leaves_the_invoice_unattached(
+        self, tmp_path: Path, refs: tuple[Path, Path]
+    ) -> None:
+        """The knob the operator turns when a wrong attachment is worse than none."""
+        clients, articles = refs
+        source = write_xlsx(tmp_path / "cmd.xlsx")
+
+        attached = generate(
+            source,
+            clients_path=clients,
+            articles_path=articles,
+            output_dir=tmp_path / "a",
+            threshold=0.60,
+        )
+        # Above 1 on purpose: the postcode and city bonuses are *added* to the
+        # name score, so a well-matched customer can exceed 1.0.
+        strict = generate(
+            source,
+            clients_path=clients,
+            articles_path=articles,
+            output_dir=tmp_path / "b",
+            threshold=1.5,
+        )
+
+        assert attached.clients[0].attached
+        assert attached.clients[0].score > 1.0
+        assert not strict.clients[0].attached

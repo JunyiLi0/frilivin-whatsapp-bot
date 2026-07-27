@@ -19,7 +19,8 @@ from whatsapp_bot.sage import SageError, SageResult, generate
 
 SPREADSHEET_SUFFIXES = (".xlsx", ".xlsm")
 COUNTER_KEY = "sage:generated"
-MAX_WARNING_LINES = 6
+MAX_WARNING_LINES = 12
+MAX_CLIENT_LINES = 5
 
 
 class SageImportHandler(Handler):
@@ -57,6 +58,7 @@ class SageImportHandler(Handler):
                 clients_path=Path(self.settings.sage_clients_path),
                 articles_path=Path(self.settings.sage_articles_path),
                 output_dir=Path(self.settings.media_outbox_dir),
+                threshold=self.settings.sage_client_match_threshold,
             )
         except SageError as exc:
             ctx.logger.warning("sage_failed", filename=msg.filename, reason=str(exc))
@@ -73,14 +75,23 @@ class SageImportHandler(Handler):
             ]
 
         duration_ms = round((time.perf_counter() - started) * 1000)
+        unattached = [m.name for m in result.clients if not m.attached]
         ctx.logger.info(
             "sage_generated",
             filename=msg.filename,
             output=result.filename,
             invoices=result.invoices,
             lines=result.lines,
+            clients=[
+                {"order": m.order, "code": m.code, "score": round(m.score, 2)}
+                for m in result.clients
+            ],
+            unattached_clients=unattached,
+            warnings=len(result.warnings),
             duration_ms=duration_ms,
         )
+        # The full report only exists here, so it must be readable in the logs.
+        ctx.logger.info("sage_report", report=result.report)
 
         previous = int(ctx.get_state(COUNTER_KEY) or "0")
         ctx.set_state(COUNTER_KEY, str(previous + 1))
@@ -104,11 +115,21 @@ class SageImportHandler(Handler):
             f"✅ {result.filename}",
             f"Commande {orders} — {result.invoices} facture(s), {result.lines} ligne(s).",
         ]
+
+        # Naming the customer each invoice was attached to, with its score, is
+        # what makes a wrong attachment visible *before* the import: a fuzzy
+        # match that silently picks the wrong account is worse than none.
+        if result.clients:
+            lines.append("")
+            lines.extend(match.describe() for match in result.clients[:MAX_CLIENT_LINES])
+
         if result.warnings:
             lines.append("")
-            # The report's own "⚠" headings: clients to create, articles not
-            # found, unknown countries. Truncated so a caption stays readable.
-            lines.extend(result.warnings[:MAX_WARNING_LINES])
+            shown = result.warnings[:MAX_WARNING_LINES]
+            lines.extend(shown)
+            if len(result.warnings) > MAX_WARNING_LINES:
+                lines.append(f"   … et {len(result.warnings) - MAX_WARNING_LINES} ligne(s) de plus")
             lines.append("")
-            lines.append("Détail complet dans les logs du worker.")
+            lines.append("Rapport complet : `make logs` sur le serveur.")
+
         return "\n".join(lines)

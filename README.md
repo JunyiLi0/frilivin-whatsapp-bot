@@ -472,9 +472,36 @@ fichier refusé :
 | `liste des clients introuvable` | l'export manque dans `sage-data/` |
 | `Le fichier n'a pas pu être téléchargé` | échec côté WhatsApp ; renvoyez-le |
 
-Quand la génération aboutit mais que des données manquent (client absent de la fiche,
-article inconnu, pays sans code ISO), la légende du fichier renvoyé liste ces
-avertissements — ce sont les points à vérifier dans Sage avant de valider.
+### Client ou article introuvable — la génération continue
+
+Ni l'un ni l'autre n'interrompt le traitement. Le fichier est produit, avec des valeurs
+de repli, et **la légende dit exactement ce qui a été supposé** :
+
+| Cas | Ce qui est écrit dans le fichier |
+| --- | --- |
+| **Article introuvable** | code nettoyé de la référence, description reconstruite depuis le libellé (ou la catégorie), TVA à 20 % par défaut |
+| **Client non rattaché** | code client **vide**, raison sociale et adresse recopiées depuis la commande, mode TVA déduit du pays et du code postal |
+
+```
+✅ import_sage_999.txt
+Commande 1104999 — 1 facture(s), 22 ligne(s).
+
+👤 CL0295 (SAS BOST) — score 1.02
+
+⚠ ARTICLES NON TROUVÉS dans la fiche (1) :
+   - # ZZ999999-1 PANTALON  ->  ZZ999999
+```
+
+**Vérifiez toujours la ligne 👤.** Le rapprochement client est *flou* : il compare des
+noms, et peut donc rattacher une facture au mauvais compte. C'est plus grave qu'une
+facture sans client — le second cas se voit à l'import, le premier passe inaperçu.
+Le code, le nom retenu et le score sont affichés précisément pour rendre ce risque
+visible avant que vous n'importiez.
+
+`SAGE_CLIENT_MATCH_THRESHOLD` (0,60 par défaut) règle l'exigence. Le score additionne
+la ressemblance du nom et des bonus code postal / ville, et peut donc dépasser 1.
+Monter le seuil laisse plus de factures sans code client ; le baisser multiplie les
+rattachements douteux.
 
 ### Ce qui change dans le pipeline
 

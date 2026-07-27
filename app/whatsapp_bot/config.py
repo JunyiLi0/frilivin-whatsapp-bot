@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     sage_articles_path: str = "/data/sage/articles.txt"
     # Empty means anyone may submit a spreadsheet; a list restricts it.
     sage_admin_jids: str = ""
+    # Confidence needed to attach an invoice to a Sage customer. Raising it
+    # leaves more invoices without a customer code; lowering it risks attaching
+    # one to the wrong account, which is far harder to notice.
+    sage_client_match_threshold: float = 0.60
 
     # --- broadcast handler ---
     broadcast_enabled: bool = True

@@ -25,6 +25,27 @@ class SageError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class ClientMatch:
+    """Which Sage customer an order was attached to, and how confidently."""
+
+    order: str
+    name: str
+    #: Sage code, or None when nothing reached the threshold.
+    code: str | None
+    matched_name: str
+    score: float
+
+    @property
+    def attached(self) -> bool:
+        return bool(self.code)
+
+    def describe(self) -> str:
+        if self.attached:
+            return f"👤 {self.code} ({self.matched_name}) — score {self.score:.2f}"
+        return f"⚠️ Client « {self.name} » non rattaché (meilleur score {self.score:.2f})"
+
+
+@dataclass(frozen=True)
 class SageResult:
     output_path: Path
     filename: str
@@ -32,8 +53,10 @@ class SageResult:
     invoices: int
     lines: int
     report: str
-    #: Things the operator should check in Sage afterwards.
+    #: Things the operator should check in Sage afterwards, detail lines included.
     warnings: list[str]
+    #: One entry per order, in the order they appear in the spreadsheet.
+    clients: list[ClientMatch]
 
 
 def order_suffix(order_number: str | None) -> str:
@@ -99,6 +122,7 @@ def generate(
     clients_path: Path,
     articles_path: Path,
     output_dir: Path,
+    threshold: float = generator.SEUIL_CLIENT,
 ) -> SageResult:
     """Build the Sage import file for ``spreadsheet``.
 
@@ -131,6 +155,7 @@ def generate(
             str(clients_path),
             str(articles_path),
             str(output_path),
+            seuil=threshold,
             fmt=fmt,
             commandes=commandes,
             clients=load_clients(clients_path),
@@ -151,9 +176,51 @@ def generate(
         lines=lines,
         report=report,
         warnings=_warnings(report),
+        clients=_client_matches(commandes, load_clients(clients_path), threshold),
     )
 
 
+def _client_matches(
+    commandes: list[dict[str, Any]], clients: list[dict[str, str]], threshold: float
+) -> list[ClientMatch]:
+    """Re-run the customer match, for reporting only.
+
+    ``fabriquer`` does this internally but only prints the outcome. Running the
+    same function again costs ~140 ms per order and gives a structured answer
+    instead of prose to parse — the caption can then show *which* customer an
+    invoice was attached to, so a wrong attachment is visible before import.
+    """
+    matches: list[ClientMatch] = []
+    for cmd in commandes:
+        fiche, score = generator.match_client(cmd, clients, threshold)
+        matches.append(
+            ClientMatch(
+                order=str(cmd.get("cmd") or ""),
+                name=str(cmd.get("nom") or ""),
+                code=str(fiche["code"]) if fiche else None,
+                matched_name=str(fiche["nom"]) if fiche else "",
+                score=float(score),
+            )
+        )
+    return matches
+
+
 def _warnings(report: str) -> list[str]:
-    """The report's "⚠" headings — what the operator has to check in Sage."""
-    return [line.strip() for line in report.splitlines() if line.lstrip().startswith("⚠")]
+    """The report's "⚠" sections — headings *and* their detail lines.
+
+    The heading alone ("3 articles non trouvés") tells the operator there is a
+    problem but not which one, and the full report only reaches the worker logs
+    — which nobody reads from a phone.
+    """
+    collected: list[str] = []
+    inside = False
+    for raw in report.splitlines():
+        line = raw.rstrip()
+        if line.lstrip().startswith("⚠"):
+            collected.append(line.strip())
+            inside = True
+        elif inside and line.lstrip().startswith("-"):
+            collected.append(f"   {line.strip()}")
+        elif not line.strip():
+            inside = False
+    return collected

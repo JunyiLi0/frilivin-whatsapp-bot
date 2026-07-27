@@ -105,6 +105,36 @@ class TestGeneration:
         assert "import_sage_999.txt" in replies[0].text
         assert "1104999" in replies[0].text
 
+    def test_caption_names_the_customer_and_its_score(
+        self, sage_settings: Settings, context: Context, tmp_path: Path
+    ) -> None:
+        """A wrong fuzzy match must be visible before the file is imported."""
+        handler = SageImportHandler(sage_settings)
+        replies = handler.run(spreadsheet_message(tmp_path), context)
+
+        assert replies is not None
+        assert "CL0295" in replies[0].text
+        assert "score" in replies[0].text
+
+    def test_caption_lists_which_article_is_missing(
+        self, sage_settings: Settings, context: Context, tmp_path: Path
+    ) -> None:
+        rows = [
+            ["TaylormanCommande", ""],
+            ["Numéro", "1104333"],
+            ["Client", "SAS BOST"],
+            ["Adresse", "1 cour ga 75002 paris FRANCE"],
+            ["N°", "Référence", "Prix", "Quantité", "Colisage"],
+            ["1", "# ZZ999999-1 PANTALON", "5.00", "1", "1"],
+        ]
+        path = write_xlsx(tmp_path / "manquant.xlsx", rows)
+        msg = make_message("", msg_type="document", filename="manquant.xlsx", media_path=str(path))
+
+        replies = SageImportHandler(sage_settings).run(msg, context)
+
+        assert replies is not None
+        assert "ZZ999999" in replies[0].text
+
     def test_processes_any_filename(
         self, sage_settings: Settings, context: Context, tmp_path: Path
     ) -> None:
