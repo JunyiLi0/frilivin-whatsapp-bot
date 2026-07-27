@@ -153,13 +153,21 @@ tunnel : `ssh -L 8000:127.0.0.1:8000 bot@167.233.137.207`.
   affiche la valeur exacte à recopier.
 - **Citation d'un message** : Baileys exige l'objet complet, pas un id. Le bridge
   garde un LRU id → clé (`quoted-cache.js`) ; id inconnu = envoi sans citation.
+- **« Le fichier n'a pas pu être téléchargé » alors que WhatsApp va bien** : le
+  volume `media_data` est monté sur `/media` en `root:root`, or le bridge tourne
+  en uid 1000 et l'api/worker en uid 10001 — aucun ne pouvait créer son
+  sous-dossier. Le service `media-init` du `docker-compose.yml` pose désormais
+  `/media/in` (bridge) et `/media/out` (worker) avant le démarrage. Le message
+  d'erreur accuse WhatsApp, la cause est locale : vérifier `media_download_failed`
+  dans les logs du bridge, qui porte l'`EACCES` réel.
+- **Exports Sage intervertis** : `sage-data/clients.txt` contenait en fait
+  l'export *articles* (déposé sous le mauvais nom). L'import échoue alors sur la
+  résolution des clients. Contrôle rapide : l'en-tête de `clients.txt` commence
+  par `Code<TAB>Nom<TAB>Société`, celui d'`articles.txt` par
+  `Code<TAB>Désignation courte`.
 
 ## 8. Reste à faire
 
-- Aucun test réel de l'import Sage **sur le serveur** : les exports doivent être
-  déposés dans `~/frilivin-whatsapp-bot/sage-data/{clients,articles}.txt`
-  (voir `sage-data/.gitkeep`). Vérifié en local sur les vrais fichiers, pas en
-  production.
 - Pas de purge des pièces jointes : `MEDIA_RETENTION_DAYS` existe dans la config
   mais rien ne l'applique encore.
 - Aucune PR ouverte, par choix de l'utilisateur. Push direct sur la branche.
