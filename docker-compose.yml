@@ -1,8 +1,8 @@
 name: frilivin-whatsapp-bot
 
-# Rotation des logs : sur le Free Tier Oracle, le disque est la ressource
-# qui manque en premier. Sans cette limite, un conteneur bavard peut remplir
-# le volume racine en quelques semaines.
+# Rotation des logs : sur un petit VPS, le disque est la ressource qui manque
+# en premier. Sans cette limite, un conteneur bavard peut remplir le volume
+# racine en quelques semaines.
 x-logging: &default-logging
   driver: json-file
   options:

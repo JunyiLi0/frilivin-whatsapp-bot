@@ -75,8 +75,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # The target is Oracle Ampere A1, so the images have to build for arm64.
-      # CI runners are x86_64, hence the emulation layer.
+      # The target is an ARM64 VPS (Hetzner CAX11, Oracle Ampere A1), so the
+      # images have to build for arm64. CI runners are x86_64, hence emulation.
       - uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64

@@ -1,7 +1,8 @@
 # frilivin-whatsapp-bot
 
-Bot WhatsApp **auto-hébergé**, **gratuit**, en **Docker Compose**, conçu pour tourner
-sur une instance **Ubuntu ARM64** (Oracle Cloud Free Tier, Ampere A1).
+Bot WhatsApp **auto-hébergé**, en **Docker Compose**, conçu pour tourner sur une
+instance **Ubuntu ARM64** — Hetzner Cloud CAX11 (~4 €/mois) ou Oracle Cloud Free Tier
+(Ampere A1, gratuit mais souvent en rupture de capacité).
 
 Un compte WhatsApp dédié reçoit les messages, un pipeline de handlers Python décide
 quoi en faire, et le bot répond ou relaie vers des groupes.
@@ -16,7 +17,7 @@ quoi en faire, et le bot répond ou relaie vers des groupes.
 
 1. [Architecture](#architecture)
 2. [Arborescence](#arborescence)
-3. [Déploiement sur Oracle Cloud ARM64](#déploiement-sur-oracle-cloud-arm64)
+3. [Déploiement sur un VPS Ubuntu ARM64](#déploiement-sur-un-vps-ubuntu-arm64)
 4. [Scanner le QR code](#scanner-le-qr-code)
 5. [Trouver les JID des groupes](#trouver-les-jid-des-groupes)
 6. [Diffuser une liste avec `!envoi`](#diffuser-une-liste-avec-envoi)
@@ -102,11 +103,52 @@ avant l'envoi réel, puis rappelle l'api pour inscrire le statut final en base.
 
 ---
 
-## Déploiement sur Oracle Cloud ARM64
+## Déploiement sur un VPS Ubuntu ARM64
+
+Les étapes 2 à 6 sont identiques quel que soit l'hébergeur. Seule la création de
+l'instance change.
 
 ### 1. Créer l'instance
 
-Dans la console Oracle Cloud : **Compute ▸ Instances ▸ Create instance**.
+#### Option A — Hetzner Cloud CAX11 *(recommandé)*
+
+Le meilleur rapport prix/adéquation : ARM64 natif, 4 Go de RAM, disponible
+immédiatement. Comptez ~3,80 €/mois pour le serveur et ~0,60 €/mois pour l'IPv4
+(tarifs à vérifier au moment de la commande).
+
+Une fois le compte créé et le moyen de paiement enregistré, dans `console.hetzner.com` :
+
+1. **New project** (par exemple `whatsapp-bot`), puis ouvrez-le.
+2. Onglet **Security ▸ SSH keys ▸ Add SSH key** : collez votre clé publique
+   (`cat ~/.ssh/id_ed25519.pub` ; si vous n'en avez pas, créez-la avec
+   `ssh-keygen -t ed25519`). L'ajouter *avant* le serveur évite de recevoir un mot de
+   passe root par e-mail.
+3. **Servers ▸ Add Server**.
+
+| Réglage | Valeur |
+| --- | --- |
+| Location | **Falkenstein**, Nuremberg ou Helsinki |
+| Image | **Ubuntu 24.04** |
+| Type | onglet **Arm64** → **CAX11** (2 vCPU, 4 Go, 40 Go) |
+| Networking | **IPv4 + IPv6** (décocher IPv4 économise ~0,60 €/mois, mais impose un accès SSH en IPv6) |
+| SSH keys | cochez la clé ajoutée à l'étape 2 |
+| Firewalls | **Create firewall** → une seule règle entrante : **TCP 22**, idéalement limitée à votre IP |
+| Backups | facultatif (+20 %) ; `make backup` couvre déjà l'essentiel |
+| Name | `whatsapp-bot` |
+
+4. **Create & Buy now**. La machine est prête en ~30 secondes et son IPv4 s'affiche
+   dans la liste. La facturation est horaire : supprimer le serveur arrête les frais.
+
+> Le pare-feu Hetzner est gratuit et s'applique **en amont de la VM**. Laissez le
+> trafic sortant entièrement ouvert : le bot n'a besoin que de sortir.
+
+L'utilisateur par défaut est `root`. Passez à l'[étape 2](#2-durcir-laccès-ssh-hetzner)
+avant tout le reste.
+
+#### Option B — Oracle Cloud Always Free (Ampere A1)
+
+Gratuit à vie, mais la capacité A1 est fréquemment épuisée (`Out of host capacity`).
+Dans la console Oracle : **Compute ▸ Instances ▸ Create instance**.
 
 | Réglage | Valeur |
 | --- | --- |
@@ -119,17 +161,63 @@ Dans la console Oracle Cloud : **Compute ▸ Instances ▸ Create instance**.
 > **Always Free** : la shape A1.Flex est gratuite dans la limite de 4 OCPU et 24 Go
 > cumulés sur le tenancy. Vérifiez la mention « Always Free eligible » avant de valider.
 
-### 2. Se connecter
+> **En cas de `Out of host capacity`** : les ressources Always Free n'existent que dans
+> la région d'origine du compte, changer de région ne contourne donc rien. Ne précisez
+> aucun fault domain, alternez les availability domains si votre région en a plusieurs,
+> et relancez la création en boucle — la capacité se libère en continu. Passer le compte
+> en Pay As You Go améliore la priorité sans rendre les ressources gratuites payantes.
+
+L'utilisateur par défaut est `ubuntu`, déjà sans mot de passe et avec sudo : l'étape 2
+ne s'applique pas, passez directement à l'étape 3.
+
+### 2. Durcir l'accès SSH (Hetzner)
+
+Contrairement à l'image Oracle, celle de Hetzner expose `root` sur une IP publique.
+Deux minutes de durcissement s'imposent.
 
 ```bash
-ssh ubuntu@<IP_PUBLIQUE>
+ssh root@<IP_PUBLIQUE>
+
+adduser --disabled-password --gecos "" bot
+usermod -aG sudo bot
+echo "bot ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-bot
+rsync --archive --chown=bot:bot ~/.ssh /home/bot
 ```
 
-> **Aucun port à ouvrir.** Les services n'écoutent que sur `127.0.0.1` : ni la Security
-> List Oracle ni `iptables` n'ont besoin d'être modifiés. Pour interroger l'api depuis
-> votre poste, passez par un tunnel SSH (voir [Exploitation](#exploitation)).
+Interdisez ensuite la connexion de `root` et l'authentification par mot de passe :
 
-### 3. Installer Docker
+```bash
+cat > /etc/ssh/sshd_config.d/99-hardening.conf <<'EOF'
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+EOF
+systemctl restart ssh
+```
+
+**Sans fermer cette session**, vérifiez depuis un autre terminal que
+`ssh bot@<IP_PUBLIQUE>` fonctionne — c'est votre filet de sécurité si la configuration
+est erronée.
+
+Activez enfin les mises à jour de sécurité automatiques :
+
+```bash
+sudo apt update && sudo apt install -y unattended-upgrades
+sudo dpkg-reconfigure -plow unattended-upgrades
+```
+
+### 3. Se connecter
+
+```bash
+ssh bot@<IP_PUBLIQUE>      # ubuntu@... sur Oracle
+```
+
+> **Aucun port à ouvrir.** Les services n'écoutent que sur `127.0.0.1` : ni le pare-feu
+> de l'hébergeur ni `iptables` n'ont besoin d'être ouverts au-delà du port 22. Pour
+> interroger l'api depuis votre poste, passez par un tunnel SSH (voir
+> [Exploitation](#exploitation)).
+
+### 4. Installer Docker
 
 ```bash
 curl -fsSL https://get.docker.com | sudo sh
@@ -140,7 +228,7 @@ docker --version && docker compose version
 
 Le script officiel gère nativement `linux/arm64`.
 
-### 4. Récupérer le projet et le configurer
+### 5. Récupérer le projet et le configurer
 
 ```bash
 git clone https://github.com/JunyiLi0/frilivin-whatsapp-bot.git
@@ -156,13 +244,24 @@ sed -i "s/^BOT_TOKEN=.*/BOT_TOKEN=$(openssl rand -hex 32)/" .env
 
 Relisez `.env` : chaque variable y est commentée.
 
-### 5. Construire et démarrer
+### 6. Construire et démarrer
 
 ```bash
-docker compose build      # ~3-5 min sur 1 OCPU, la première fois
+docker compose build      # ~2 min sur un CAX11, ~5 min sur 1 OCPU Oracle
 docker compose up -d
 docker compose ps
 ```
+
+> **Sur une machine à 1 Go de RAM** (Oracle `E2.1.Micro`, GCP `e2-micro`…), le stack
+> tient — il consomme ~350-400 Mo en régime normal — mais les `mem_limit` du
+> `docker-compose.yml` sont dimensionnés pour une machine confortable. Divisez-les par
+> deux et ajoutez du swap avant de démarrer :
+>
+> ```bash
+> sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+> sudo mkswap /swapfile && sudo swapon /swapfile
+> echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+> ```
 
 ---
 
@@ -523,7 +622,7 @@ make node-test     # tests du bridge
 
 La CI GitHub Actions rejoue exactement ces vérifications sur chaque pull request, et
 construit en plus les deux images en `linux/arm64` pour garantir la compatibilité avec
-la cible Oracle.
+la cible ARM64.
 
 ### Tester le pipeline sans WhatsApp
 
