@@ -1,8 +1,8 @@
 # frilivin-whatsapp-bot
 
-Bot WhatsApp **auto-hébergé**, en **Docker Compose**, conçu pour tourner sur une
-instance **Ubuntu ARM64** — Hetzner Cloud CAX11 (~4 €/mois) ou Oracle Cloud Free Tier
-(Ampere A1, gratuit mais souvent en rupture de capacité).
+Bot WhatsApp **auto-hébergé**, en **Docker Compose**, conçu pour tourner sur un petit
+VPS **Ubuntu** — Hetzner Cloud (~4 €/mois) ou Oracle Cloud Free Tier (gratuit mais
+souvent en rupture de capacité). Les images sont multi-arch : **arm64 comme amd64**.
 
 Un compte WhatsApp dédié reçoit les messages, un pipeline de handlers Python décide
 quoi en faire, et le bot répond ou relaie vers des groupes.
@@ -129,7 +129,7 @@ Une fois le compte créé et le moyen de paiement enregistré, dans `console.het
 | --- | --- |
 | Location | **Falkenstein**, Nuremberg ou Helsinki |
 | Image | **Ubuntu 24.04** |
-| Type | onglet **Arm64** → **CAX11** (2 vCPU, 4 Go, 40 Go) |
+| Type | onglet **Arm64** → **CAX11** ; si l'ARM est en rupture, un **CX** x86 fait tout aussi bien (voir ci-dessous) |
 | Networking | **IPv4 + IPv6** (décocher IPv4 économise ~0,60 €/mois, mais impose un accès SSH en IPv6) |
 | SSH keys | cochez la clé ajoutée à l'étape 2 |
 | Firewalls | **Create firewall** → une seule règle entrante : **TCP 22**, idéalement limitée à votre IP |
@@ -141,6 +141,13 @@ Une fois le compte créé et le moyen de paiement enregistré, dans `console.het
 
 > Le pare-feu Hetzner est gratuit et s'applique **en amont de la VM**. Laissez le
 > trafic sortant entièrement ouvert : le bot n'a besoin que de sortir.
+
+> **ARM en rupture ?** La disponibilité des CAX varie selon le datacenter — essayez
+> Nuremberg ou Helsinki avant de renoncer. Sinon, prenez un **CX** (x86) : aucune image
+> n'est épinglée sur une architecture et les trois images de base sont multi-arch, donc
+> le stack se construit et tourne à l'identique. N'importe quel modèle avec **2 Go de
+> RAM ou plus** convient, le stack consommant ~350-400 Mo. L'ARM64 était un héritage de
+> la cible Oracle, pas une dépendance.
 
 L'utilisateur par défaut est `root`. Passez à l'[étape 2](#2-durcir-laccès-ssh-hetzner)
 avant tout le reste.
