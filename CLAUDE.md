@@ -132,7 +132,7 @@ make backup         # wa_session + base
 ```
 
 `make check` = ruff + ruff format + mypy strict + pytest (**184**) + eslint +
-`node --test` (**68**). Tout doit rester vert.
+`node --test` (**72**). Tout doit rester vert.
 
 Attention : `make health` interroge `127.0.0.1`. Depuis un poste local il faut un
 tunnel : `ssh -L 8000:127.0.0.1:8000 bot@167.233.137.207`.
@@ -160,6 +160,11 @@ tunnel : `ssh -L 8000:127.0.0.1:8000 bot@167.233.137.207`.
   `/media/in` (bridge) et `/media/out` (worker) avant le démarrage. Le message
   d'erreur accuse WhatsApp, la cause est locale : vérifier `media_download_failed`
   dans les logs du bridge, qui porte l'`EACCES` réel.
+- **Pièce jointe reçue en `.bin`** : WhatsApp nomme le fichier d'après son
+  *mimetype*, pas d'après `fileName`. Tout ce qui part en
+  `application/octet-stream` arrive en `.bin`, inouvrable. `mimetypeFor()`
+  (`wa.js`) déduit le type de l'extension ; une extension absente de la table
+  retombe sur octet-stream et reproduira le symptôme.
 - **Exports Sage intervertis** : `sage-data/clients.txt` contenait en fait
   l'export *articles* (déposé sous le mauvais nom). L'import échoue alors sur la
   résolution des clients. Contrôle rapide : l'en-tête de `clients.txt` commence
