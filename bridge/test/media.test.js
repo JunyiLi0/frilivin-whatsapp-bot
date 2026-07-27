@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { safeMediaName, shouldDownload } from "../src/wa.js";
+import { mimetypeFor, safeMediaName, shouldDownload } from "../src/wa.js";
 
 const RULES = { extensions: [".xlsx", ".xlsm"], maxBytes: 10 * 1024 * 1024 };
 
@@ -43,6 +43,34 @@ describe("safeMediaName", () => {
   it("caps the length", () => {
     const name = safeMediaName("A", `${"x".repeat(400)}.xlsx`);
     assert.ok(name.length <= 130, name.length);
+  });
+});
+
+describe("mimetypeFor", () => {
+  it("types the Sage import as plain text", () => {
+    // Sent as application/octet-stream, WhatsApp ignores fileName and shows
+    // the attachment as a .bin — the recipient cannot open it.
+    assert.equal(mimetypeFor("import_sage_999.txt"), "text/plain");
+  });
+
+  it("is case insensitive on the extension", () => {
+    assert.equal(mimetypeFor("RAPPORT.TXT"), "text/plain");
+  });
+
+  it("knows the spreadsheet formats", () => {
+    assert.equal(
+      mimetypeFor("commande.xlsx"),
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    assert.equal(mimetypeFor("export.csv"), "text/csv");
+    assert.equal(mimetypeFor("facture.pdf"), "application/pdf");
+  });
+
+  it("falls back to octet-stream on an unknown or missing extension", () => {
+    assert.equal(mimetypeFor("archive.zip"), "application/octet-stream");
+    assert.equal(mimetypeFor("sans-extension"), "application/octet-stream");
+    assert.equal(mimetypeFor(""), "application/octet-stream");
+    assert.equal(mimetypeFor(null), "application/octet-stream");
   });
 });
 

@@ -29,6 +29,24 @@ const MAX_RECONNECT_DELAY_MS = 60_000;
 const WATCHDOG_INTERVAL_MS = 45_000;
 const OCTET_STREAM = "application/octet-stream";
 
+// WhatsApp names the received attachment from its mimetype, not from fileName:
+// anything sent as octet-stream lands as a ".bin" the recipient cannot open.
+// Only the formats the bot actually produces or forwards are listed.
+const MIMETYPES = new Map([
+  [".txt", "text/plain"],
+  [".csv", "text/csv"],
+  [".pdf", "application/pdf"],
+  [".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+  [".xlsm", "application/vnd.ms-excel.sheet.macroEnabled.12"],
+  [".xls", "application/vnd.ms-excel"],
+]);
+
+/** The mimetype to declare for an outbound document, by extension. */
+export function mimetypeFor(filename) {
+  const suffix = extname(String(filename ?? "")).toLowerCase();
+  return MIMETYPES.get(suffix) ?? OCTET_STREAM;
+}
+
 /**
  * A filename safe to write inside the media directory.
  *
@@ -298,7 +316,9 @@ export class WhatsAppClient {
     }
   }
 
-  async sendDocument(jid, { path, filename, caption = "", mimetype = OCTET_STREAM }) {
+  // The mimetype defaults from the name the recipient will see, so a caller
+  // only passes one to override that guess.
+  async sendDocument(jid, { path, filename, caption = "", mimetype = mimetypeFor(filename || path) }) {
     if (this.#config.dryRun) {
       this.#log.info({ event: "send_dry_run", jid, document: path, filename });
       return `dry-${randomUUID()}`;
