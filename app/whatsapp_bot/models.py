@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # WhatsApp's own ceiling for a text message body.
 MAX_TEXT_LENGTH = 65536
@@ -41,9 +41,28 @@ class InboundMessage(BaseModel):
     text: str = Field(default="", max_length=MAX_TEXT_LENGTH)
     quoted_id: str | None = Field(default=None, max_length=256)
 
+    # --- attachment, set by the bridge for documents it downloaded ---
+    filename: str | None = Field(default=None, max_length=512)
+    mimetype: str | None = Field(default=None, max_length=256)
+    media_size: int | None = None
+    #: Absolute path on the shared media volume. None when nothing was
+    #: downloaded — either no attachment, or the download failed.
+    media_path: str | None = Field(default=None, max_length=1024)
+
     @property
     def is_private(self) -> bool:
         return not self.is_group
+
+    @property
+    def has_file(self) -> bool:
+        """True when an attachment is actually readable on disk."""
+        return bool(self.media_path)
+
+    def filename_suffix(self) -> str:
+        """Lowercase extension of the attachment, ``''`` when there is none."""
+        if not self.filename or "." not in self.filename:
+            return ""
+        return f".{self.filename.rsplit('.', 1)[1].lower()}"
 
     @property
     def body(self) -> str:
@@ -59,15 +78,33 @@ class InboundMessage(BaseModel):
 
 
 class Outbound(BaseModel):
-    """A message a handler wants to send. The only accepted return value."""
+    """A message a handler wants to send. The only accepted return value.
+
+    Either a text message, or a document with ``text`` as its optional
+    caption — never neither.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     jid: str = Field(min_length=1, max_length=256)
-    text: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    text: str = Field(default="", max_length=MAX_TEXT_LENGTH)
     quoted_id: str | None = Field(default=None, max_length=256)
+    #: Path on the shared media volume of a file to attach.
+    document_path: str | None = Field(default=None, max_length=1024)
+    #: Name the recipient sees. Defaults to the basename of ``document_path``.
+    filename: str | None = Field(default=None, max_length=512)
     # Filled in by the pipeline runner; handlers do not need to set it.
     handler: str | None = None
+
+    @model_validator(mode="after")
+    def _needs_content(self) -> Outbound:
+        if not self.text and not self.document_path:
+            raise ValueError("an outbound message needs text, a document, or both")
+        return self
+
+    @property
+    def is_document(self) -> bool:
+        return bool(self.document_path)
 
     def reply_to(self, msg: InboundMessage) -> Outbound:
         """Return a copy quoting ``msg`` — sugar for handlers."""

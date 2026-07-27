@@ -86,12 +86,15 @@ export class Outbox {
     }
   }
 
-  async enqueue({ id, jid, text, quotedId = null }) {
+  async enqueue({ id, jid, text, quotedId = null, documentPath = null, filename = null }) {
     const item = {
       id: id || `out-${randomUUID().replace(/-/g, "")}`,
       jid,
       text,
       quotedId,
+      // When set, the item is a document and `text` becomes its caption.
+      documentPath,
+      filename,
       attempts: 0,
       queuedAt: new Date().toISOString(),
     };

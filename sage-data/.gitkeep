@@ -1,0 +1,11 @@
+Déposez ici les deux exports Sage, sous ces noms exacts :
+
+  clients.txt    export « Liste des clients »
+  articles.txt   export « Liste des articles »
+
+Ce répertoire est monté en lecture seule dans l'api et le worker (/data/sage).
+Son contenu n'est jamais versionné : il contient des données clients réelles.
+
+Depuis votre poste :
+  scp Export_des_clients.txt  bot@<IP>:~/frilivin-whatsapp-bot/sage-data/clients.txt
+  scp Export_des_articles.txt bot@<IP>:~/frilivin-whatsapp-bot/sage-data/articles.txt

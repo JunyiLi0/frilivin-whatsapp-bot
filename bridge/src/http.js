@@ -42,26 +42,44 @@ export function createApp({ config, logger, wa, outbox, api }) {
   });
 
   app.post("/send", requireToken, async (req, res) => {
-    const { id, jid, text, quoted_id: quotedId } = req.body ?? {};
+    const {
+      id,
+      jid,
+      text,
+      quoted_id: quotedId,
+      document_path: documentPath,
+      filename,
+    } = req.body ?? {};
+
+    const isDocument = typeof documentPath === "string" && documentPath.length > 0;
 
     if (typeof jid !== "string" || jid.length === 0) {
       return res.status(422).json({ error: "jid is required" });
     }
-    if (typeof text !== "string" || text.length === 0) {
-      return res.status(422).json({ error: "text is required" });
+    // A document may travel with an empty caption; a text message may not.
+    if (!isDocument && (typeof text !== "string" || text.length === 0)) {
+      return res.status(422).json({ error: "text or document_path is required" });
     }
-    if (text.length > MAX_TEXT_LENGTH) {
+    if (typeof text === "string" && text.length > MAX_TEXT_LENGTH) {
       return res.status(422).json({ error: `text exceeds ${MAX_TEXT_LENGTH} characters` });
     }
 
     const outboundId = await outbox.enqueue({
       id: typeof id === "string" && id ? id : undefined,
       jid,
-      text,
+      text: typeof text === "string" ? text : "",
       quotedId: typeof quotedId === "string" && quotedId ? quotedId : null,
+      documentPath: isDocument ? documentPath : null,
+      filename: typeof filename === "string" && filename ? filename : null,
     });
 
-    logger.info({ event: "send_accepted", outbound_id: outboundId, jid, queued: outbox.size });
+    logger.info({
+      event: "send_accepted",
+      outbound_id: outboundId,
+      jid,
+      document: isDocument ? documentPath : undefined,
+      queued: outbox.size,
+    });
     return res.status(202).json({ id: outboundId, queued: outbox.size });
   });
 

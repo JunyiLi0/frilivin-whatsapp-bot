@@ -116,10 +116,14 @@ def webhook(msg: InboundMessage, settings: Config, conn: Db, _auth: Auth) -> Web
         log.info("message_duplicate", message_id=msg.id)
         return WebhookAck(status="duplicate", id=msg.id)
 
+    # A message carrying a file gets the document budget: reading a spreadsheet
+    # and the Sage reference exports cannot fit in the 2 s a text message needs.
+    timeout = settings.worker_document_job_timeout if msg.has_file else settings.worker_job_timeout
+
     job = get_queue(settings=settings).enqueue(
         process_message,
         msg.model_dump(by_alias=False),
-        job_timeout=settings.worker_job_timeout,
+        job_timeout=timeout,
         retry=Retry(max=settings.worker_max_retries, interval=settings.retry_intervals),
         failure_ttl=86400,
         result_ttl=3600,
@@ -133,6 +137,7 @@ def webhook(msg: InboundMessage, settings: Config, conn: Db, _auth: Auth) -> Web
         chat_jid=msg.chat_jid,
         is_group=msg.is_group,
         type=msg.type,
+        job_timeout=timeout,
     )
     return WebhookAck(status="queued", id=msg.id, job_id=job.id)
 

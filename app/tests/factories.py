@@ -18,8 +18,16 @@ def make_message(
     msg_type: str = "text",
     quoted_id: str | None = None,
     timestamp: int = 1700000000,
+    filename: str | None = None,
+    mimetype: str | None = None,
+    media_path: str | None = None,
+    media_size: int | None = None,
 ) -> InboundMessage:
-    """Build a plausible inbound message."""
+    """Build a plausible inbound message.
+
+    Pass ``filename`` / ``media_path`` for a document; ``media_path`` left None
+    reproduces an attachment the bridge failed to download.
+    """
     return InboundMessage(
         id=message_id,
         from_jid=from_jid,
@@ -29,6 +37,10 @@ def make_message(
         type=msg_type,
         text=text,
         quoted_id=quoted_id,
+        filename=filename,
+        mimetype=mimetype,
+        media_path=media_path,
+        media_size=media_size,
     )
 
 

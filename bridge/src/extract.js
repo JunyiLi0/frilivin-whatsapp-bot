@@ -81,6 +81,25 @@ export function extractContent(message) {
   return { type: "other", text: "" };
 }
 
+/**
+ * Metadata of an attached document, or null when the message carries none.
+ *
+ * Only documents are described: images, video and audio are content the
+ * handlers have no use for, and downloading them would fill the disk for
+ * nothing.
+ *
+ * @returns {{filename: string, mimetype: string, size: number}|null}
+ */
+export function documentInfo(message) {
+  const doc = message?.documentMessage;
+  if (!doc) return null;
+  return {
+    filename: String(doc.fileName ?? "").trim(),
+    mimetype: String(doc.mimetype ?? ""),
+    size: Number(doc.fileLength ?? 0) || 0,
+  };
+}
+
 export function extractQuotedId(message) {
   if (!message) return null;
   for (const value of Object.values(message)) {
@@ -127,6 +146,8 @@ export function toWebhookPayload(waMessage, now = () => Date.now()) {
     ? (waMessage.key.participantPn ?? waMessage.key.participant ?? chatJid)
     : (waMessage.key.senderPn ?? chatJid);
 
+  const document = documentInfo(message);
+
   return {
     id: waMessage.key.id,
     from: sender,
@@ -136,5 +157,11 @@ export function toWebhookPayload(waMessage, now = () => Date.now()) {
     type,
     text,
     quoted_id: extractQuotedId(message),
+    filename: document?.filename ?? null,
+    mimetype: document?.mimetype ?? null,
+    media_size: document?.size ?? null,
+    // Filled in by the bridge once the file is on disk; the API never sees a
+    // path for a document that failed to download.
+    media_path: null,
   };
 }

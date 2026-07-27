@@ -37,7 +37,14 @@ async function main() {
     minDelayMs: config.minDelayMs,
     maxDelayMs: config.maxDelayMs,
     maxAttempts: config.maxSendAttempts,
-    send: (item) => wa.sendText(item.jid, item.text, item.quotedId),
+    send: (item) =>
+      item.documentPath
+        ? wa.sendDocument(item.jid, {
+            path: item.documentPath,
+            filename: item.filename,
+            caption: item.text ?? "",
+          })
+        : wa.sendText(item.jid, item.text, item.quotedId),
     onSettled: (item, result) =>
       api.sendStatus({
         id: item.id,

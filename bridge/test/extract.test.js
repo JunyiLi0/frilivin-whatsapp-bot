@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   contentKey,
+  documentInfo,
   extractContent,
   extractQuotedId,
   toEpochSeconds,
@@ -116,7 +117,59 @@ describe("toEpochSeconds", () => {
   });
 });
 
+describe("documentInfo", () => {
+  it("reads an attached document", () => {
+    assert.deepEqual(
+      documentInfo({
+        documentMessage: {
+          fileName: "Bost_1104999.xlsx",
+          mimetype: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          fileLength: 7398,
+        },
+      }),
+      {
+        filename: "Bost_1104999.xlsx",
+        mimetype: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        size: 7398,
+      },
+    );
+  });
+
+  it("returns null when there is no document", () => {
+    assert.equal(documentInfo({ conversation: "salut" }), null);
+    assert.equal(documentInfo(null), null);
+  });
+
+  it("copes with a document that declares nothing", () => {
+    assert.deepEqual(documentInfo({ documentMessage: {} }), {
+      filename: "",
+      mimetype: "",
+      size: 0,
+    });
+  });
+});
+
 describe("toWebhookPayload", () => {
+  it("carries the document metadata", () => {
+    const payload = toWebhookPayload({
+      key: { id: "FFF666", remoteJid: "33612345678@s.whatsapp.net", fromMe: false },
+      messageTimestamp: 1700000000,
+      message: {
+        documentMessage: {
+          fileName: "Bost_1104999.xlsx",
+          mimetype: "application/vnd.ms-excel",
+          fileLength: 7398,
+        },
+      },
+    });
+
+    assert.equal(payload.type, "document");
+    assert.equal(payload.filename, "Bost_1104999.xlsx");
+    assert.equal(payload.media_size, 7398);
+    // The bridge fills this in only once the file is actually on disk.
+    assert.equal(payload.media_path, null);
+  });
+
   it("builds the payload for a private message", () => {
     const payload = toWebhookPayload({
       key: privateKey,
@@ -133,6 +186,10 @@ describe("toWebhookPayload", () => {
       type: "text",
       text: "!ping",
       quoted_id: null,
+      filename: null,
+      mimetype: null,
+      media_size: null,
+      media_path: null,
     });
   });
 

@@ -7,13 +7,15 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, extname, join } from "node:path";
 
 // Baileys is published as CommonJS; Node's interop exposes makeWASocket as the
 // default export and everything else as named exports.
 import makeWASocket, {
   Browsers,
   DisconnectReason,
+  downloadMediaMessage,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
@@ -25,6 +27,31 @@ import { LruCache, trimForQuote } from "./quoted-cache.js";
 
 const MAX_RECONNECT_DELAY_MS = 60_000;
 const WATCHDOG_INTERVAL_MS = 45_000;
+const OCTET_STREAM = "application/octet-stream";
+
+/**
+ * A filename safe to write inside the media directory.
+ *
+ * Everything a remote sender controls is stripped: directory components,
+ * leading dots, and anything outside a conservative character set. The
+ * message id prefix keeps two files of the same name apart.
+ */
+export function safeMediaName(messageId, filename) {
+  const base = basename(String(filename ?? "")).replace(/[^A-Za-z0-9._-]/g, "_");
+  const cleaned = base.replace(/^\.+/, "").slice(0, 120) || "piece-jointe";
+  // No dot is allowed in the id half: a message id never contains one, and
+  // permitting it would let "../" survive as ".._".
+  const id = String(messageId ?? "").replace(/[^A-Za-z0-9_-]/g, "_") || randomUUID();
+  return `${id}-${cleaned}`;
+}
+
+/** True when the bridge is willing to put this attachment on disk. */
+export function shouldDownload(payload, { extensions, maxBytes }) {
+  if (payload?.type !== "document" || !payload.filename) return false;
+  if (payload.media_size && payload.media_size > maxBytes) return false;
+  if (extensions.length === 0) return true;
+  return extensions.includes(extname(payload.filename).toLowerCase());
+}
 
 /**
  * What to tell the operator when the bridge is not connected.
@@ -221,8 +248,74 @@ export class WhatsAppClient {
       // Remember the key so a handler can answer by quoting this message.
       this.#quoted.set(payload.id, trimForQuote({ key: waMessage.key, text: payload.text }));
 
+      if (shouldDownload(payload, this.#config.media)) {
+        payload.media_path = await this.#download(waMessage, payload);
+      }
+
       await this.#api.sendWebhook(payload);
     }
+  }
+
+  /**
+   * Put an inbound attachment on the shared media volume.
+   *
+   * A download failure is never fatal: the payload simply reaches the API
+   * without a path, and the handler reports the problem to the sender rather
+   * than the message vanishing.
+   *
+   * @returns the absolute path, or null when the download failed.
+   */
+  async #download(waMessage, payload) {
+    const target = join(this.#config.media.inboxDir, safeMediaName(payload.id, payload.filename));
+    try {
+      const buffer = await downloadMediaMessage(
+        waMessage,
+        "buffer",
+        {},
+        { logger: this.#log, reuploadRequest: this.#sock.updateMediaMessage },
+      );
+      if (buffer.length > this.#config.media.maxBytes) {
+        // fileLength is sender-declared; the real size is only known here.
+        throw new Error(`fichier trop volumineux (${buffer.length} octets)`);
+      }
+      await mkdir(this.#config.media.inboxDir, { recursive: true });
+      await writeFile(target, buffer);
+      this.#log.info({
+        event: "media_downloaded",
+        message_id: payload.id,
+        filename: payload.filename,
+        bytes: buffer.length,
+      });
+      return target;
+    } catch (err) {
+      this.#log.error({
+        event: "media_download_failed",
+        message_id: payload.id,
+        filename: payload.filename,
+        error: String(err?.message ?? err),
+      });
+      return null;
+    }
+  }
+
+  async sendDocument(jid, { path, filename, caption = "", mimetype = OCTET_STREAM }) {
+    if (this.#config.dryRun) {
+      this.#log.info({ event: "send_dry_run", jid, document: path, filename });
+      return `dry-${randomUUID()}`;
+    }
+
+    if (!this.#sock || !this.#connected) {
+      throw new Error("WhatsApp socket is not connected");
+    }
+
+    const document = await readFile(path);
+    const result = await this.#sock.sendMessage(jid, {
+      document,
+      fileName: filename || basename(path),
+      mimetype,
+      ...(caption ? { caption } : {}),
+    });
+    return result?.key?.id ?? null;
   }
 
   async sendText(jid, text, quotedId = null) {

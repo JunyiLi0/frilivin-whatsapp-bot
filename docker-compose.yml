@@ -50,6 +50,8 @@ services:
       SERVICE_NAME: api
     volumes:
       - sqlite_data:/data
+      - media_data:/media
+      - ./sage-data:/data/sage:ro
     ports:
       # Bind explicite sur la boucle locale : rien n'est joignable depuis
       # l'extérieur de la machine. Pour un accès distant, passer par SSH.
@@ -84,6 +86,9 @@ services:
       SERVICE_NAME: worker
     volumes:
       - sqlite_data:/data
+      - media_data:/media
+      # Exports Sage (clients/articles) fournis par l'exploitant, jamais versionnés.
+      - ./sage-data:/data/sage:ro
     depends_on:
       redis:
         condition: service_healthy
@@ -103,6 +108,7 @@ services:
       SERVICE_NAME: bridge
     volumes:
       - wa_session:/data
+      - media_data:/media
     ports:
       - "127.0.0.1:${BRIDGE_PORT:-3000}:3000"
     depends_on:
@@ -132,4 +138,6 @@ volumes:
   wa_session:
   # Base SQLite, partagée entre l'api (écriture des entrants) et le worker.
   sqlite_data:
+  # Pièces jointes : /media/in écrit par le bridge, /media/out par le worker.
+  media_data:
   redis_data:

@@ -46,8 +46,15 @@ class Settings(BaseSettings):
 
     # --- worker ---
     worker_job_timeout: int = 2
+    # Documents are processed in the same queue but need a far larger budget:
+    # parsing a spreadsheet and the Sage reference exports cannot fit in 2 s.
+    worker_document_job_timeout: int = 60
     worker_max_retries: int = 3
     worker_retry_intervals: str = "2,8,32"
+
+    # --- media ---
+    media_outbox_dir: str = "/media/out"
+    media_retention_days: int = 14
 
     # --- rate limiting ---
     rate_limit_per_day: int = 500
@@ -57,6 +64,13 @@ class Settings(BaseSettings):
     ping_enabled: bool = True
     relay_keywords: str = ""
     relay_target_jids: str = ""
+
+    # --- sage import handler ---
+    sage_enabled: bool = True
+    sage_clients_path: str = "/data/sage/clients.txt"
+    sage_articles_path: str = "/data/sage/articles.txt"
+    # Empty means anyone may submit a spreadsheet; a list restricts it.
+    sage_admin_jids: str = ""
 
     # --- broadcast handler ---
     broadcast_enabled: bool = True
@@ -80,6 +94,10 @@ class Settings(BaseSettings):
     @property
     def relay_target_list(self) -> list[str]:
         return _split_csv(self.relay_target_jids)
+
+    @property
+    def sage_admin_list(self) -> list[str]:
+        return _split_csv(self.sage_admin_jids)
 
     @property
     def broadcast_admin_list(self) -> list[str]:

@@ -41,6 +41,11 @@ include = ["whatsapp_bot*"]
 line-length = 100
 target-version = "py311"
 
+[tool.ruff.format]
+# Left byte-for-byte as received, so a diff against the operator's script stays
+# readable. Its lint exemptions are listed under per-file-ignores.
+exclude = ["whatsapp_bot/sage/generator.py"]
+
 [tool.ruff.lint]
 select = [
     "E",    # pycodestyle
@@ -58,6 +63,14 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
+# Vendored from the operator's validated script. Reformatting it would make any
+# future diff against the original unreadable, for no behavioural gain.
+"whatsapp_bot/sage/generator.py" = [
+    "E401", "E501", "E701", "E702", "E731", "E741",
+    "B007", "B023", "B904",
+    "I001", "SIM105", "SIM108",
+    "RUF001", "RUF002", "RUF003",
+]
 
 # -----------------------------------------------------------------------------
 # mypy — strict sur le code applicatif, souple sur les tests
@@ -72,6 +85,13 @@ pretty = true
 module = "tests.*"
 disallow_untyped_defs = false
 disallow_untyped_decorators = false
+
+# Vendored third-party-ish code, untyped by nature. service.py is the typed
+# boundary in front of it and stays under `strict`.
+[[tool.mypy.overrides]]
+module = "whatsapp_bot.sage.generator"
+ignore_errors = true
+disallow_untyped_defs = false
 
 # -----------------------------------------------------------------------------
 # pytest

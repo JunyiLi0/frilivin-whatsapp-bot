@@ -35,6 +35,8 @@ class BridgeClient:
             "jid": out.jid,
             "text": out.text,
             "quoted_id": out.quoted_id,
+            "document_path": out.document_path,
+            "filename": out.filename,
         }
         try:
             response = self._client.post("/send", json=payload)

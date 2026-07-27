@@ -13,6 +13,13 @@ function int(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function csv(value, fallback = "") {
+  return String(value ?? fallback)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function bool(value, fallback = false) {
   if (value === undefined || value === "") return fallback;
   return ["1", "true", "yes", "on"].includes(String(value).toLowerCase());
@@ -41,6 +48,14 @@ export function loadConfig(env = process.env) {
     outboxPath: env.OUTBOX_PATH ?? "/data/outbox.json",
     browserName: env.WA_BROWSER_NAME ?? "frilivin-bot",
     quotedCacheSize: int(env.QUOTED_CACHE_SIZE, 2000),
+    media: {
+      inboxDir: env.MEDIA_INBOX_DIR ?? "/media/in",
+      // Only these extensions are pulled down; empty means "every document".
+      extensions: csv(env.MEDIA_ALLOWED_EXTENSIONS, ".xlsx,.xlsm").map((e) =>
+        e.startsWith(".") ? e.toLowerCase() : `.${e.toLowerCase()}`,
+      ),
+      maxBytes: int(env.MEDIA_MAX_BYTES, 10 * 1024 * 1024),
+    },
     dryRun: bool(env.BRIDGE_DRY_RUN, false),
     minDelayMs,
     maxDelayMs,

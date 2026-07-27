@@ -164,18 +164,26 @@ def record_outbound(
     reply_to: str | None = None,
     error: str | None = None,
 ) -> None:
+    # A document's ledger line records the filename, so `make db` shows what
+    # actually left rather than an empty caption.
+    text = out.text
+    if out.is_document:
+        label = out.filename or str(out.document_path)
+        text = f"[{label}] {out.text}".strip()
+
     conn.execute(
         """
         INSERT OR REPLACE INTO messages
             (id, direction, chat_jid, from_jid, is_group, type, text,
              quoted_id, status, error, handler, reply_to)
-        VALUES (?, 'out', ?, NULL, ?, 'text', ?, ?, ?, ?, ?, ?)
+        VALUES (?, 'out', ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             outbound_id,
             out.jid,
             int(out.jid.endswith("@g.us")),
-            out.text,
+            "document" if out.is_document else "text",
+            text,
             out.quoted_id,
             status,
             error,

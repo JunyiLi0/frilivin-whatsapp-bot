@@ -7,6 +7,15 @@ data/
 session/
 outbox.json
 
+# Exports Sage : des milliers de clients réels, avec adresses et n° de TVA.
+# Ils vivent sur le serveur, jamais dans le dépôt.
+sage-data/
+!sage-data/.gitkeep
+
+# Pièces jointes reçues et fichiers d'import produits
+media/
+import_sage_*.txt
+
 # Python
 __pycache__/
 *.py[cod]

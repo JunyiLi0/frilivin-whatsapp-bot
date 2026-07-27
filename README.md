@@ -21,12 +21,13 @@ quoi en faire, et le bot répond ou relaie vers des groupes.
 4. [Scanner le QR code](#scanner-le-qr-code)
 5. [Trouver les JID des groupes](#trouver-les-jid-des-groupes)
 6. [Diffuser une liste avec `!envoi`](#diffuser-une-liste-avec-envoi)
-7. [Ajouter un comportement](#ajouter-un-comportement)
-8. [Configuration](#configuration)
-9. [Exploitation](#exploitation)
-10. [Développement et tests](#développement-et-tests)
-11. [Dépannage](#dépannage)
-12. [Limites connues](#limites-connues)
+7. [Générer un import Sage 50](#générer-un-import-sage-50)
+8. [Ajouter un comportement](#ajouter-un-comportement)
+9. [Configuration](#configuration)
+10. [Exploitation](#exploitation)
+11. [Développement et tests](#développement-et-tests)
+12. [Dépannage](#dépannage)
+13. [Limites connues](#limites-connues)
 
 ---
 
@@ -421,6 +422,73 @@ le bridge espace les envois de 2 à 8 s, soit environ 12 messages par minute en 
 
 ---
 
+## Générer un import Sage 50
+
+Envoyez un fichier de commande `.xlsx` au bot : il répond avec le fichier
+d'import Sage 50 correspondant, nommé d'après les **trois derniers chiffres du numéro
+de commande**.
+
+```
+Vous  →  📎 Bost_1104999.xlsx
+Bot   →  📎 import_sage_999.txt
+         ✅ import_sage_999.txt
+         Commande 1104999 — 1 facture(s), 22 ligne(s).
+```
+
+Aucune commande à retenir : **tout `.xlsx` reçu est traité**. Le nom du fichier envoyé
+n'a aucune importance, seul le numéro de commande *à l'intérieur* détermine celui du
+fichier produit.
+
+### Installer les exports de référence
+
+Le générateur a besoin des deux exports Sage. Ils vivent sur le serveur, dans
+`sage-data/`, et **ne sont jamais versionnés** — ils contiennent vos fichiers clients
+réels, adresses et numéros de TVA compris.
+
+```bash
+scp Export_des_clients.txt  bot@<IP>:~/frilivin-whatsapp-bot/sage-data/clients.txt
+scp Export_des_articles.txt bot@<IP>:~/frilivin-whatsapp-bot/sage-data/articles.txt
+```
+
+Le répertoire est monté en **lecture seule** dans l'api et le worker. Remplacer un
+export suffit à le prendre en compte : les index sont mis en cache mais invalidés dès
+que le fichier change, sans redémarrage.
+
+Par défaut, quiconque écrit au bot peut soumettre un classeur. Pour restreindre :
+
+```dotenv
+SAGE_ADMIN_JIDS=33612345678,33698765432
+```
+
+### En cas d'échec
+
+Le bot répond toujours, avec la raison — un fichier avalé en silence serait pire qu'un
+fichier refusé :
+
+| Réponse | Cause |
+| --- | --- |
+| `lecture du fichier impossible` | ce n'est pas un classeur exploitable |
+| `aucune commande détectée` | classeur lisible, mais sans commande reconnaissable |
+| `liste des clients introuvable` | l'export manque dans `sage-data/` |
+| `Le fichier n'a pas pu être téléchargé` | échec côté WhatsApp ; renvoyez-le |
+
+Quand la génération aboutit mais que des données manquent (client absent de la fiche,
+article inconnu, pays sans code ISO), la légende du fichier renvoyé liste ces
+avertissements — ce sont les points à vérifier dans Sage avant de valider.
+
+### Ce qui change dans le pipeline
+
+Un message porteur d'un fichier reçoit un budget de traitement de
+`WORKER_DOCUMENT_JOB_TIMEOUT` (60 s par défaut) au lieu des 2 s d'un message texte :
+lire un classeur et 4 Mo d'exports Sage ne tient pas en deux secondes. Ce budget élargi
+ne s'applique **qu'**aux messages avec pièce jointe.
+
+Le bridge ne télécharge que les extensions listées dans `MEDIA_ALLOWED_EXTENSIONS`
+(`.xlsx,.xlsm` par défaut) et refuse au-delà de `MEDIA_MAX_BYTES`. Sans ce filtre, la
+première vidéo reçue remplirait le disque.
+
+---
+
 ## Ajouter un comportement
 
 Trois étapes, aucun enregistrement manuel : le registre découvre les handlers tout seul.
@@ -499,6 +567,7 @@ docker compose logs worker | grep handlers_loaded
 
 | Priorité | Rôle | Exemple fourni |
 | --- | --- | --- |
+| 5 | Pièces jointes | `SageImportHandler` (`.xlsx`) |
 | 10 | Commandes explicites | `PingHandler` (`!ping`) |
 | 20 | Commandes d'opérateur | `BroadcastHandler` (`!envoi`) |
 | 50 | Routage / relais | `GroupRelayHandler` |
@@ -531,6 +600,12 @@ Toutes les variables sont dans `.env` (modèle commenté : `.env.example`).
 | `BROADCAST_COMMAND` | `!envoi` | Commande déclenchant une diffusion |
 | `BROADCAST_MAX_RECIPIENTS` | `25` | Destinataires max ; borné à `RATE_LIMIT_PER_MINUTE - 1` |
 | `BROADCAST_ALIASES` | *(vide)* | Alias `nom=cible`, séparés par des virgules |
+| `SAGE_CLIENTS_PATH` | `/data/sage/clients.txt` | Export Sage des clients |
+| `SAGE_ARTICLES_PATH` | `/data/sage/articles.txt` | Export Sage des articles |
+| `SAGE_ADMIN_JIDS` | *(vide)* | Qui peut soumettre un classeur ; vide = tout le monde |
+| `MEDIA_ALLOWED_EXTENSIONS` | `.xlsx,.xlsm` | Extensions téléchargées ; vide = tous les documents |
+| `MEDIA_MAX_BYTES` | `10485760` | Taille maximale d'une pièce jointe |
+| `WORKER_DOCUMENT_JOB_TIMEOUT` | `60` | Budget pour un message avec fichier |
 
 Le **limiteur de débit est global** : les 500 envois/jour et 30/minute sont partagés par
 tous les handlers, et comptés dans Redis de façon atomique. Un envoi refusé est
