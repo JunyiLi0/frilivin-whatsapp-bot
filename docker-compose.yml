@@ -10,6 +10,32 @@ x-logging: &default-logging
     max-file: "3"
 
 services:
+  # Le volume média est partagé par des services qui tournent sous des UID
+  # différents (bridge : 1000 « node », api/worker : 10001 « bot »). Docker crée
+  # le point de montage en root:root, donc aucun des deux ne peut y créer ses
+  # sous-dossiers : le bridge échouait sur `mkdir /media/in` (EACCES) et
+  # signalait une pièce jointe non téléchargeable. Ce conteneur prépare les deux
+  # répertoires puis sort ; il est le seul à avoir besoin de root.
+  media-init:
+    image: busybox:1.37
+    user: root
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        mkdir -p /media/in /media/out
+        # Écriture réservée au service qui produit, lecture ouverte à l'autre :
+        # le bridge dépose les entrants, le worker écrit les fichiers générés.
+        chown 1000:1000 /media/in
+        chown 10001:10001 /media/out
+        chmod 0755 /media/in /media/out
+    volumes:
+      - media_data:/media
+    restart: "no"
+    logging: *default-logging
+    mem_limit: 64m
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -94,6 +120,8 @@ services:
         condition: service_healthy
       api:
         condition: service_healthy
+      media-init:
+        condition: service_completed_successfully
     logging: *default-logging
     mem_limit: 512m
 
@@ -116,6 +144,8 @@ services:
       # reçus après le scan du QR partiraient dans le vide.
       api:
         condition: service_healthy
+      media-init:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD
@@ -139,5 +169,6 @@ volumes:
   # Base SQLite, partagée entre l'api (écriture des entrants) et le worker.
   sqlite_data:
   # Pièces jointes : /media/in écrit par le bridge, /media/out par le worker.
+  # Les deux répertoires et leurs propriétaires sont posés par `media-init`.
   media_data:
   redis_data:
