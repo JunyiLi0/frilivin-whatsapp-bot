@@ -21,13 +21,14 @@ quoi en faire, et le bot répond ou relaie vers des groupes.
 4. [Scanner le QR code](#scanner-le-qr-code)
 5. [Trouver les JID des groupes](#trouver-les-jid-des-groupes)
 6. [Diffuser une liste avec `!envoi`](#diffuser-une-liste-avec-envoi)
-7. [Générer un import Sage 50](#générer-un-import-sage-50)
-8. [Ajouter un comportement](#ajouter-un-comportement)
-9. [Configuration](#configuration)
-10. [Exploitation](#exploitation)
-11. [Développement et tests](#développement-et-tests)
-12. [Dépannage](#dépannage)
-13. [Limites connues](#limites-connues)
+7. [Écrire à des groupes avec `!envoigroupe`](#écrire-à-des-groupes-avec-envoigroupe)
+8. [Générer un import Sage 50](#générer-un-import-sage-50)
+9. [Ajouter un comportement](#ajouter-un-comportement)
+10. [Configuration](#configuration)
+11. [Exploitation](#exploitation)
+12. [Développement et tests](#développement-et-tests)
+13. [Dépannage](#dépannage)
+14. [Limites connues](#limites-connues)
 
 ---
 
@@ -91,6 +92,7 @@ avant l'envoi réel, puis rappelle l'api pour inscrire le statut final en base.
     │   ├── db.py               # schéma SQLite, déduplication, journal
     │   ├── ratelimit.py        # 500/jour et 30/minute, atomique (Lua)
     │   ├── sending.py          # LiveSender : l'unique chemin de sortie
+    │   ├── groups.py           # liste des groupes en cache + recherche par fragments
     │   ├── api/main.py         # POST /webhook, GET /health, GET /groups
     │   ├── worker/
     │   │   ├── main.py         # boucle RQ + dead-letter queue
@@ -327,10 +329,19 @@ make groups
 {
   "count": 2,
   "groups": [
-    {"jid": "120363000000000000@g.us", "subject": "Alertes techniques", "participants": 12}
+    {
+      "jid": "120363000000000000@g.us",
+      "subject": "Alertes techniques",
+      "participants": 12,
+      "numbers": ["33766660673", "33612345678"]
+    }
   ]
 }
 ```
+
+`numbers` liste les numéros des membres que WhatsApp nous communique : c'est ce qui
+permet à [`!envoigroupe`](#écrire-à-des-groupes-avec-envoigroupe) de retrouver un groupe
+à partir du numéro de l'un d'eux, sans avoir à recopier son JID.
 
 Reportez le ou les JID voulus dans `.env` :
 
@@ -419,6 +430,106 @@ Pour la même raison, le plafond est automatiquement borné à `RATE_LIMIT_PER_M
 (l'accusé de réception consomme lui aussi un envoi). Si vous montez
 `BROADCAST_MAX_RECIPIENTS`, montez `RATE_LIMIT_PER_MINUTE` avec — et gardez en tête que
 le bridge espace les envois de 2 à 8 s, soit environ 12 messages par minute en pratique.
+
+---
+
+## Écrire à des groupes avec `!envoigroupe`
+
+`!envoi` demande le JID du groupe — 18 chiffres que personne ne retape. `!envoigroupe`
+désigne le groupe comme un humain le ferait : **un bout de son nom, un bout du numéro de
+n'importe lequel de ses membres**, puis le message.
+
+```
+!envoigroupe
+Chantier Nord; 33766660673; Livraison décalée à jeudi
+; 0612345678; Merci de confirmer la réception
+Dupont; ; Le devis est parti ce matin
+```
+
+Le bot répond en citant votre demande :
+
+```
+📤 3 message(s) en file d'envoi :
+  ✅ Chantier Nord
+  ✅ Chantier Sud
+  ✅ Client Dupont
+
+⏳ Chaque message part avec 2-8 s d'écart.
+```
+
+### Format d'une ligne
+
+| Champ | Contenu | Peut être vide |
+| --- | --- | --- |
+| 1 | nom du groupe, entier ou partiel | ✅ si le 2ᵉ est rempli |
+| 2 | numéro d'un membre du groupe, entier ou partiel | ✅ si le 1ᵉʳ est rempli |
+| 3 | le message | ❌ |
+
+Les **deux premiers `;` séparent** : le message peut en contenir d'autres.
+
+### Comment le groupe est retrouvé
+
+Les deux champs acceptent un fragment, et les critères fournis doivent **tous** être
+satisfaits par le même groupe :
+
+- `No` retrouve « **No**rd » — insensible à la casse, aux accents et à la ponctuation
+  (`ile de france` retrouve « Île-de-France ») ;
+- `337` retrouve le membre `33766660673` ; le numéro peut être écrit
+  `+33 7 66 66 06 73`, et la forme nationale `07 66 66 06 73` est cherchée telle quelle
+  **et** en `337…` (indicatif réglable, `PHONE_COUNTRY_CODE`) ;
+- `No; 337; message` retrouve le groupe qui satisfait les deux.
+
+Quand plusieurs groupes correspondent, **le meilleur niveau de correspondance gagne** :
+un nom exact l'emporte sur un début de mot, qui l'emporte sur un fragment trouvé au
+milieu. Deux groupes à égalité ne sont pas départagés — la ligne est rejetée.
+
+### Une ligne rejetée est expliquée
+
+**Rien n'est envoyé au hasard** : écrire au mauvais groupe ne se rattrape pas. Une ligne
+qui ne désigne pas exactement un groupe n'est pas envoyée, et l'accusé de réception en
+donne la raison, avec son numéro de ligne :
+
+```
+📤 1 message(s) en file d'envoi :
+  ✅ Client Dupont
+
+⚠️ 2 ligne(s) rejetée(s) :
+  • ligne 2 : 2 groupes correspondent à nom « Chantier » (Chantier Nord, Chantier Sud) — précisez
+  • ligne 3 : aucun groupe ne correspond à nom « Bretagne » + numéro « 337 »
+```
+
+Les autres lignes du lot partent normalement : une erreur n'annule pas le reste.
+
+### Activer la commande
+
+Le handler suit la même allowlist que `!envoi` — **sans elle, il est désactivé** :
+
+```dotenv
+BROADCAST_ADMIN_JIDS=33612345678,33698765432
+```
+
+Une allowlist distincte est possible via `GROUP_BROADCAST_ADMIN_JIDS`. Puis
+`docker compose up -d worker`. Un expéditeur non autorisé n'obtient **aucune réponse**
+(`group_broadcast_refused` dans les logs).
+
+`!envoigroupe` seul affiche un mémo et **la liste des groupes connus** — c'est le moyen
+le plus rapide de voir sous quel nom le bot connaît un groupe.
+
+### La liste des groupes
+
+Lister les groupes interroge WhatsApp, pas une base locale : la liste est donc réutilisée
+pendant `GROUP_DIRECTORY_TTL_SECONDS` (5 min par défaut), et **un lot entier est résolu
+sur un seul appel**. Si une ligne ne trouve rien, la liste est malgré tout rafraîchie une
+fois avant de conclure : un groupe créé ou rejoint depuis le dernier appel ne doit pas
+passer pour une faute de frappe.
+
+Le bot ne peut retrouver un groupe que s'il en est membre, et ne connaît le numéro d'un
+membre que si WhatsApp le lui donne (certains comptes ne sont identifiés que par un
+`@lid` anonyme — voir [Limites connues](#limites-connues)). Le nom cherché est celui du
+**groupe**, pas celui du contact.
+
+Le plafond `GROUP_BROADCAST_MAX_RECIPIENTS` obéit exactement aux mêmes règles que celui
+de `!envoi` : lot trop grand refusé en bloc, et borné à `RATE_LIMIT_PER_MINUTE - 1`.
 
 ---
 
@@ -570,6 +681,7 @@ docker compose logs worker | grep handlers_loaded
 | 5 | Pièces jointes | `SageImportHandler` (`.xlsx`) |
 | 10 | Commandes explicites | `PingHandler` (`!ping`) |
 | 20 | Commandes d'opérateur | `BroadcastHandler` (`!envoi`) |
+| 25 | Commandes d'opérateur | `GroupBroadcastHandler` (`!envoigroupe`) |
 | 50 | Routage / relais | `GroupRelayHandler` |
 | 1000 | Observation, jamais de réponse | `FallbackLogHandler` |
 
@@ -600,6 +712,12 @@ Toutes les variables sont dans `.env` (modèle commenté : `.env.example`).
 | `BROADCAST_COMMAND` | `!envoi` | Commande déclenchant une diffusion |
 | `BROADCAST_MAX_RECIPIENTS` | `25` | Destinataires max ; borné à `RATE_LIMIT_PER_MINUTE - 1` |
 | `BROADCAST_ALIASES` | *(vide)* | Alias `nom=cible`, séparés par des virgules |
+| `GROUP_BROADCAST_COMMAND` | `!envoigroupe` | Commande d'envoi à des groupes |
+| `GROUP_BROADCAST_ADMIN_JIDS` | *(vide)* | Qui peut écrire aux groupes ; vide = `BROADCAST_ADMIN_JIDS` |
+| `GROUP_BROADCAST_MAX_RECIPIENTS` | `25` | Groupes max ; borné à `RATE_LIMIT_PER_MINUTE - 1` |
+| `GROUP_DIRECTORY_TTL_SECONDS` | `300` | Durée de réutilisation de la liste des groupes |
+| `PHONE_COUNTRY_CODE` | `33` | Indicatif supposé pour un numéro écrit `0…` |
+| `WORKER_DIRECTORY_JOB_TIMEOUT` | `30` | Budget pour `!envoigroupe` (liste des groupes) |
 | `SAGE_CLIENTS_PATH` | `/data/sage/clients.txt` | Export Sage des clients |
 | `SAGE_ARTICLES_PATH` | `/data/sage/articles.txt` | Export Sage des articles |
 | `SAGE_ADMIN_JIDS` | *(vide)* | Qui peut soumettre un classeur ; vide = tout le monde |
@@ -625,6 +743,7 @@ make health        # état de l'api, de la base et de Redis
 make groups        # lister les groupes et leurs JID
 make db            # les 20 derniers messages, entrants et sortants
 make smoke         # injecter un faux « !ping » sans passer par WhatsApp
+make smoke-group   # injecter un « !envoigroupe » (NOM=… TEL=… MSG=…)
 make dlq           # jobs en échec définitif
 make dlq-requeue   # les rejouer après correction
 make backup        # archive de la session WhatsApp + de la base
@@ -718,6 +837,14 @@ make db
 `make smoke` injecte un faux message `!ping` dans `/webhook`, puis rejoue le même `id`
 pour vérifier que la déduplication répond bien `duplicate`.
 
+Les deux commandes d'envoi ont leur propre injection :
+
+```bash
+make smoke-broadcast                          # !envoi, deux destinataires
+make smoke-group NOM=Nord MSG="Test"          # !envoigroupe, par nom
+make smoke-group TEL=33766660673 MSG="Test"   # ... ou par numéro de membre
+```
+
 ---
 
 ## Dépannage
@@ -756,6 +883,10 @@ docker compose up -d && make logs-bridge
 - **Un seul worker** : suffisant pour 300 messages/jour. Au-delà, lancez plusieurs
   répliques — SQLite est en WAL et le limiteur de débit est déjà partagé via Redis.
 - **Les quotas sont calculés en UTC**, pas dans le fuseau local.
+- **Recherche de groupe par numéro** : WhatsApp identifie de plus en plus les membres par
+  un `@lid` anonyme. Quand il ne transmet aucun numéro pour un membre, celui-ci n'apparaît
+  pas dans `numbers` et `!envoigroupe` ne peut pas le retrouver par son numéro — le nom du
+  groupe reste utilisable. `make groups` montre exactement ce que le bot connaît.
 - **Pas de médias** : le bot lit les légendes des images et documents mais n'envoie que
   du texte.
 

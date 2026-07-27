@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     # Documents are processed in the same queue but need a far larger budget:
     # parsing a spreadsheet and the Sage reference exports cannot fit in 2 s.
     worker_document_job_timeout: int = 60
+    # A command that has to list the WhatsApp groups first cannot fit in 2 s
+    # either: the answer comes from WhatsApp, not from local state.
+    worker_directory_job_timeout: int = 30
     worker_max_retries: int = 3
     worker_retry_intervals: str = "2,8,32"
 
@@ -81,6 +84,19 @@ class Settings(BaseSettings):
     # "nord=120363000000000000@g.us,sud=33612345678"
     broadcast_aliases: str = ""
 
+    # --- group broadcast handler ---
+    group_broadcast_enabled: bool = True
+    group_broadcast_command: str = "!envoigroupe"
+    # Empty falls back to BROADCAST_ADMIN_JIDS; empty on both sides disables
+    # the handler entirely.
+    group_broadcast_admin_jids: str = ""
+    group_broadcast_max_recipients: int = 25
+    # How long a group list is reused before being fetched from WhatsApp again.
+    group_directory_ttl_seconds: float = 300.0
+    # Country code assumed when a member number is typed in national form
+    # (07 66 66 06 73). Empty disables that reading.
+    phone_country_code: str = "33"
+
     @property
     def retry_intervals(self) -> list[int]:
         """Backoff, in seconds, between worker retries."""
@@ -103,6 +119,16 @@ class Settings(BaseSettings):
     def broadcast_admin_list(self) -> list[str]:
         """Raw allowlist entries — the handler canonicalises them."""
         return _split_csv(self.broadcast_admin_jids)
+
+    @property
+    def group_broadcast_admin_list(self) -> list[str]:
+        """Who may write to a group — the broadcast allowlist unless overridden.
+
+        One allowlist is the common case: the people who may broadcast are the
+        people who may write to a group. A dedicated list is there for when
+        they are not.
+        """
+        return _split_csv(self.group_broadcast_admin_jids) or self.broadcast_admin_list
 
     @property
     def broadcast_alias_map(self) -> dict[str, str]:

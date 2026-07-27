@@ -72,16 +72,19 @@ Chacun a coûté un aller-retour ou un bug ; ils sont tous couverts par des test
 | 5 | `SageImportHandler` | tout `.xlsx` / `.xlsm` reçu | ✅ |
 | 10 | `PingHandler` | `!ping` | ✅ |
 | 20 | `BroadcastHandler` | `!envoi` + CSV `destinataire; message` | ✅ |
+| 25 | `GroupBroadcastHandler` | `!envoigroupe` + CSV `nom; numéro; message` | ✅ |
 | 50 | `GroupRelayHandler` | mot-clé en message privé → groupes figés | ❌ |
 | 1000 | `FallbackLogHandler` | tout ; logue si personne n'a répondu | ❌ |
 
 Priorité croissante = exécuté plus tôt. Ajouter un comportement = déposer un
 fichier dans `app/whatsapp_bot/processing/handlers/`, rien à enregistrer.
 
-`GroupRelayHandler` et `BroadcastHandler` se désactivent seuls sans configuration
-(pas de cible / pas d'admin) — c'est voulu, pas un bug.
+`GroupRelayHandler`, `BroadcastHandler` et `GroupBroadcastHandler` se désactivent
+seuls sans configuration (pas de cible / pas d'admin) — c'est voulu, pas un bug.
+`GroupBroadcastHandler` reprend `BROADCAST_ADMIN_JIDS` sauf si
+`GROUP_BROADCAST_ADMIN_JIDS` est renseigné.
 
-## 5. Les deux fonctions métier
+## 5. Les trois fonctions métier
 
 ### `!envoi` — diffusion CSV
 
@@ -97,6 +100,36 @@ JID complet, ou alias (`BROADCAST_ALIASES`, ou table `state` sous
 `broadcast:alias:<nom>`, qui gagne). Discrimination dans
 `processing/jids.py::resolve_jid` : **plus de 15 chiffres (limite E.164) = groupe**.
 Lot trop grand = refus intégral, jamais d'envoi partiel.
+
+### `!envoigroupe` — écrire à un groupe sans son JID
+
+```
+!envoigroupe
+Chantier Nord; 33766660673; Livraison décalée
+; 0612345678; Merci de confirmer
+Dupont; ; Le devis est parti
+```
+
+Les **deux premiers** `;` séparent. Champ 1 = nom du groupe, champ 2 = numéro d'un
+de ses membres ; l'un des deux peut être vide, jamais les deux. Les deux acceptent
+un fragment (`No` trouve `Nord`, `337` trouve `33766660673`).
+
+- Règles de recherche dans `groups.py::find_group` : les critères fournis doivent
+  **tous** être satisfaits, puis les candidats sont classés par leur critère le
+  plus faible (exact > début de mot > fragment) et **seul le meilleur rang
+  survit**. Égalité = ligne rejetée, jamais d'arbitrage au hasard.
+- La liste des groupes vient de `GET /groups` (bridge), mise en cache
+  `GROUP_DIRECTORY_TTL_SECONDS` (300 s) : **un lot = un appel**. Une ligne sans
+  résultat force malgré tout un rafraîchissement avant de conclure, sinon un
+  groupe rejoint depuis le dernier appel passerait pour une faute de frappe.
+- Le bridge expose `numbers` par groupe (`wa.js::participantNumbers`) : uniquement
+  les identités en `@s.whatsapp.net`. Un membre connu seulement par `@lid` n'a pas
+  de numéro et ne peut donc pas servir à retrouver son groupe.
+- **`!envoigroupe` reçoit `WORKER_DIRECTORY_JOB_TIMEOUT` (30 s)** au lieu de 2 s,
+  décidé dans `api/main.py::job_timeout_for` : la réponse vient de WhatsApp, pas
+  de l'état local.
+- Aucun groupe / plusieurs groupes → la ligne n'est pas envoyée et l'accusé de
+  réception donne la raison et le numéro de ligne. Les autres lignes partent.
 
 ### Import Sage 50
 
@@ -126,13 +159,14 @@ make health         # état api + redis + bridge
 make groups         # JID des groupes dont le bot est membre
 make smoke          # injecte un faux !ping
 make smoke-broadcast
+make smoke-group NOM=Nord MSG="Test"   # injecte un !envoigroupe
 make db             # 20 derniers messages du ledger
 make dlq            # dead-letter queue
 make backup         # wa_session + base
 ```
 
-`make check` = ruff + ruff format + mypy strict + pytest (**184**) + eslint +
-`node --test` (**72**). Tout doit rester vert.
+`make check` = ruff + ruff format + mypy strict + pytest (**266**) + eslint +
+`node --test` (**77**). Tout doit rester vert.
 
 Attention : `make health` interroge `127.0.0.1`. Depuis un poste local il faut un
 tunnel : `ssh -L 8000:127.0.0.1:8000 bot@167.233.137.207`.

@@ -73,6 +73,21 @@ def require_token(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token")
 
 
+def job_timeout_for(msg: InboundMessage, settings: Settings) -> int:
+    """How long the worker gets for this message.
+
+    The default budget is 2 s, which is all a handler needs when everything it
+    reads is local. Two cases are not: a spreadsheet, which has to be parsed
+    along with the Sage reference exports, and a command that first has to ask
+    WhatsApp which groups the bot belongs to.
+    """
+    if msg.has_file:
+        return settings.worker_document_job_timeout
+    if msg.command() == settings.group_broadcast_command.strip().lower():
+        return settings.worker_directory_job_timeout
+    return settings.worker_job_timeout
+
+
 Auth = Annotated[None, Depends(require_token)]
 Db = Annotated[sqlite3.Connection, Depends(db_dep)]
 Config = Annotated[Settings, Depends(settings_dep)]
@@ -116,9 +131,7 @@ def webhook(msg: InboundMessage, settings: Config, conn: Db, _auth: Auth) -> Web
         log.info("message_duplicate", message_id=msg.id)
         return WebhookAck(status="duplicate", id=msg.id)
 
-    # A message carrying a file gets the document budget: reading a spreadsheet
-    # and the Sage reference exports cannot fit in the 2 s a text message needs.
-    timeout = settings.worker_document_job_timeout if msg.has_file else settings.worker_job_timeout
+    timeout = job_timeout_for(msg, settings)
 
     job = get_queue(settings=settings).enqueue(
         process_message,

@@ -72,6 +72,36 @@ export function shouldDownload(payload, { extensions, maxBytes }) {
 }
 
 /**
+ * The phone numbers of a group's participants, digits only.
+ *
+ * WhatsApp addresses a member either by phone number or by LID; Baileys puts
+ * the phone form in `jid` and the anonymous one in `lid`. Only the phone form
+ * is returned: a LID is numeric too, and letting one through would make it
+ * matchable as if it were a number someone could have typed.
+ */
+export function participantNumbers(group) {
+  const numbers = new Set();
+  for (const participant of group?.participants ?? []) {
+    for (const candidate of [participant?.jid, participant?.id]) {
+      const digits = phoneDigits(candidate);
+      if (digits) numbers.add(digits);
+    }
+  }
+  return [...numbers];
+}
+
+/** @returns the digits of a phone-shaped JID, or null for anything else. */
+function phoneDigits(value) {
+  const token = String(value ?? "").trim();
+  if (!token) return null;
+  if (token.includes("@") && !token.endsWith("@s.whatsapp.net")) return null;
+  // Device suffix (33612345678:12@s.whatsapp.net) is not part of the number.
+  const local = token.split("@")[0].split(":")[0];
+  // E.164: 15 digits at most, and nothing short enough to match everything.
+  return /^\d{8,15}$/.test(local) ? local : null;
+}
+
+/**
  * What to tell the operator when the bridge is not connected.
  *
  * Silence is the worst first-run experience: no QR and no error looks
@@ -371,6 +401,8 @@ export class WhatsAppClient {
       subject: group.subject ?? "",
       participants: group.participants?.length ?? 0,
       announce: Boolean(group.announce),
+      // What lets `!envoigroupe` find a group from one member's number.
+      numbers: participantNumbers(group),
     }));
   }
 

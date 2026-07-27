@@ -1,8 +1,8 @@
 # Raccourcis d'exploitation. `make` seul affiche l'aide.
 .DEFAULT_GOAL := help
 .PHONY: help build up down restart ps logs logs-bridge qr health groups smoke \
-        smoke-broadcast db dlq dlq-requeue backup install test lint fmt typecheck check \
-        node-install node-test node-lint
+        smoke-broadcast smoke-group db dlq dlq-requeue backup install test lint fmt \
+        typecheck check node-install node-test node-lint
 
 # Charge .env s'il existe, pour disposer de BOT_TOKEN et API_PORT dans les cibles.
 -include .env
@@ -75,6 +75,24 @@ smoke-broadcast: ## Injecte une diffusion « !envoi » de 2 lignes (ADMIN=<jid|n
 	curl -fsS -X POST $(API)/webhook $(AUTH) \
 		-H 'Content-Type: application/json' \
 		-d "{\"id\":\"$$id\",\"from\":\"$$admin\",\"chat_jid\":\"$$admin\",\"is_group\":false,\"timestamp\":$$(date +%s),\"type\":\"text\",\"text\":\"!envoi\\n33766793050; Hello this is a message\\n33784828374; Another one\",\"quoted_id\":null}" \
+		| python3 -m json.tool
+	@echo "→ vérifiez le résultat avec :  make db"
+
+smoke-group: ## Injecte un « !envoigroupe » (ADMIN=<jid|numéro> NOM=… TEL=… MSG=…)
+	@admin="$(or $(ADMIN),$(firstword $(subst $(,), ,$(or $(GROUP_BROADCAST_ADMIN_JIDS),$(BROADCAST_ADMIN_JIDS)))))"; \
+	if [ -z "$$admin" ]; then \
+		echo "Renseignez BROADCAST_ADMIN_JIDS dans .env, ou passez ADMIN=33612345678"; exit 1; \
+	fi; \
+	case "$$admin" in *@*) ;; *) admin="$$admin@s.whatsapp.net";; esac; \
+	nom="$(NOM)"; tel="$(TEL)"; msg="$(or $(MSG),Test envoi groupe)"; \
+	if [ -z "$$nom" ] && [ -z "$$tel" ]; then \
+		echo "Passez au moins NOM=... ou TEL=...  (ex : make smoke-group NOM=Nord)"; exit 1; \
+	fi; \
+	id="smoke-grp-$$(date +%s)"; \
+	echo "→ envoi $$id au nom de $$admin : « $$nom ; $$tel ; $$msg »"; \
+	curl -fsS -X POST $(API)/webhook $(AUTH) \
+		-H 'Content-Type: application/json' \
+		-d "{\"id\":\"$$id\",\"from\":\"$$admin\",\"chat_jid\":\"$$admin\",\"is_group\":false,\"timestamp\":$$(date +%s),\"type\":\"text\",\"text\":\"!envoigroupe\\n$$nom; $$tel; $$msg\",\"quoted_id\":null}" \
 		| python3 -m json.tool
 	@echo "→ vérifiez le résultat avec :  make db"
 

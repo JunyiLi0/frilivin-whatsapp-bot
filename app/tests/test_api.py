@@ -10,7 +10,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from whatsapp_bot import db as db_module
-from whatsapp_bot.config import get_settings
+from whatsapp_bot.api.main import job_timeout_for
+from whatsapp_bot.config import Settings, get_settings
+from whatsapp_bot.models import InboundMessage
 
 TOKEN = "test-token-0123456789"
 AUTH = {"X-Bot-Token": TOKEN}
@@ -120,6 +122,32 @@ class TestWebhook:
         body["chat_jid"] = "120363000000000000@g.us"
 
         assert client.post("/webhook", json=body, headers=AUTH).status_code == 200
+
+
+class TestJobTimeout:
+    """Which budget the worker gets, decided at enqueue time."""
+
+    def build(self, **fields: object) -> InboundMessage:
+        return InboundMessage.model_validate({**payload(), **fields})
+
+    def test_a_text_message_gets_the_default_budget(self, settings: Settings) -> None:
+        assert job_timeout_for(self.build(), settings) == settings.worker_job_timeout
+
+    def test_a_document_gets_the_document_budget(self, settings: Settings) -> None:
+        msg = self.build(type="document", filename="commande.xlsx", media_path="/media/in/c.xlsx")
+
+        assert job_timeout_for(msg, settings) == settings.worker_document_job_timeout
+
+    def test_the_group_command_gets_the_directory_budget(self, settings: Settings) -> None:
+        """It has to ask WhatsApp for the group list before it can answer."""
+        msg = self.build(text="!envoigroupe\nNord; 337; Salut")
+
+        assert job_timeout_for(msg, settings) == settings.worker_directory_job_timeout
+
+    def test_the_plain_broadcast_keeps_the_default_budget(self, settings: Settings) -> None:
+        msg = self.build(text="!envoi\n33766793050; Salut")
+
+        assert job_timeout_for(msg, settings) == settings.worker_job_timeout
 
 
 class TestSendStatus:

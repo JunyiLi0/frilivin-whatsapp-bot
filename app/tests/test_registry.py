@@ -102,6 +102,24 @@ def test_broadcast_handler_appears_once_configured(monkeypatch: pytest.MonkeyPat
     assert "BroadcastHandler" in names(discover_handlers(DEFAULT_PACKAGE))
 
 
+def test_group_broadcast_handler_disables_itself_without_admins() -> None:
+    """Writing to a group is as irreversible as writing to a person."""
+    assert "GroupBroadcastHandler" not in names(discover_handlers(DEFAULT_PACKAGE))
+
+
+def test_group_broadcast_handler_follows_the_broadcast_allowlist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from whatsapp_bot.config import get_settings
+
+    monkeypatch.setenv("BROADCAST_ADMIN_JIDS", "33612345678")
+    get_settings.cache_clear()
+
+    found = names(discover_handlers(DEFAULT_PACKAGE))
+    # Both commands, in priority order: !envoi then !envoigroupe.
+    assert found.index("BroadcastHandler") < found.index("GroupBroadcastHandler")
+
+
 def test_get_handlers_is_cached() -> None:
     first = get_handlers()
     assert get_handlers() is first
