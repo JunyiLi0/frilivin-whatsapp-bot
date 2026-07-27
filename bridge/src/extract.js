@@ -119,9 +119,17 @@ export function toWebhookPayload(waMessage, now = () => Date.now()) {
   const isGroup = chatJid.endsWith("@g.us");
   const { type, text } = extractContent(message);
 
+  // WhatsApp increasingly addresses chats by LID (118…@lid) instead of by
+  // phone number. The server sends the phone-number form alongside it when it
+  // knows it, and that is the one a human can recognise — and the one an
+  // allowlist written by hand can match. Fall back to the LID when absent.
+  const sender = isGroup
+    ? (waMessage.key.participantPn ?? waMessage.key.participant ?? chatJid)
+    : (waMessage.key.senderPn ?? chatJid);
+
   return {
     id: waMessage.key.id,
-    from: isGroup ? (waMessage.key.participant ?? chatJid) : chatJid,
+    from: sender,
     chat_jid: chatJid,
     is_group: isGroup,
     timestamp: toEpochSeconds(waMessage.messageTimestamp, now),

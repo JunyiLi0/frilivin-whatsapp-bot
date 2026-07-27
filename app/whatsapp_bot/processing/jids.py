@@ -14,6 +14,11 @@ import re
 
 GROUP_SUFFIX = "@g.us"
 USER_SUFFIX = "@s.whatsapp.net"
+# WhatsApp's privacy-preserving address family. It identifies a real user, but
+# carries no phone number, so it can never be derived — only passed through.
+LID_SUFFIX = "@lid"
+
+KNOWN_SUFFIXES = (GROUP_SUFFIX, USER_SUFFIX, LID_SUFFIX)
 
 # E.164 caps a phone number at 15 digits; group ids are ~18. That gap is what
 # lets a bare number be told apart from a group id.
@@ -36,10 +41,10 @@ def resolve_jid(destination: str) -> str | None:
     if not token:
         return None
 
-    if token.endswith(GROUP_SUFFIX) or token.endswith(USER_SUFFIX):
+    if token.endswith(KNOWN_SUFFIXES):
         return token
     if "@" in token:
-        # Some other domain (@broadcast, @lid, a typo…). Not our call to fix.
+        # Some other domain (@broadcast, @newsletter, a typo…). Not our call to fix.
         return None
 
     # Checked before hyphens are stripped, otherwise 07-66-79-30-50 and
@@ -79,10 +84,10 @@ def normalise_jid(raw: str) -> str | None:
 def display_name(jid: str) -> str:
     """``33612345678@s.whatsapp.net`` → ``+33612345678``.
 
-    Group ids are numeric too, so they are left alone rather than being
-    dressed up as phone numbers.
+    Group ids and LIDs are numeric too, so they are left alone rather than
+    being dressed up as phone numbers they are not.
     """
     local = jid.split("@", 1)[0].split(":", 1)[0]
-    if jid.endswith(GROUP_SUFFIX) or not local.isdigit():
+    if jid.endswith((GROUP_SUFFIX, LID_SUFFIX)) or not local.isdigit():
         return local
     return f"+{local}"

@@ -102,6 +102,22 @@ class TestAuthorisation:
         )
         assert ADMIN in handler.admins
 
+    def test_admins_may_be_allowlisted_by_lid(
+        self, settings: Settings, context: Context, sender: FakeSender
+    ) -> None:
+        """When WhatsApp addresses the operator by LID and sends no phone number,
+        putting the LID in the allowlist is the escape hatch."""
+        lid = "118141732556813@lid"
+        handler = BroadcastHandler(settings.model_copy(update={"broadcast_admin_jids": lid}))
+        msg = make_message(SAMPLE, from_jid=lid, chat_jid=lid)
+
+        handler.run(msg, context)
+
+        assert sender.jids[:2] == [
+            "33766793050@s.whatsapp.net",
+            "33784828374@s.whatsapp.net",
+        ]
+
     def test_matches_the_command_in_private(self, settings: Settings) -> None:
         handler = BroadcastHandler(broadcast_settings(settings))
 

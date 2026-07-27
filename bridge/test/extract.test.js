@@ -148,6 +148,48 @@ describe("toWebhookPayload", () => {
     assert.equal(payload.chat_jid, "120363000000000000@g.us");
   });
 
+  it("prefers the phone number when the chat is addressed by LID", () => {
+    const payload = toWebhookPayload({
+      key: {
+        id: "DDD444",
+        remoteJid: "118141732556813@lid",
+        senderPn: "33612345678@s.whatsapp.net",
+        fromMe: false,
+      },
+      messageTimestamp: 1700000000,
+      message: { conversation: "!envoi" },
+    });
+
+    // The allowlist is written with phone numbers, so `from` has to be one.
+    assert.equal(payload.from, "33612345678@s.whatsapp.net");
+    // Replies still go back to the address WhatsApp actually used.
+    assert.equal(payload.chat_jid, "118141732556813@lid");
+  });
+
+  it("falls back to the LID when no phone number is provided", () => {
+    const payload = toWebhookPayload({
+      key: { id: "EEE555", remoteJid: "118141732556813@lid", fromMe: false },
+      messageTimestamp: 1700000000,
+      message: { conversation: "coucou" },
+    });
+
+    assert.equal(payload.from, "118141732556813@lid");
+  });
+
+  it("prefers the participant's phone number in a LID-addressed group", () => {
+    const payload = toWebhookPayload({
+      key: {
+        ...groupKey,
+        participant: "118141732556813@lid",
+        participantPn: "33698765432@s.whatsapp.net",
+      },
+      messageTimestamp: 1700000000,
+      message: { conversation: "bonjour" },
+    });
+
+    assert.equal(payload.from, "33698765432@s.whatsapp.net");
+  });
+
   it("ignores our own messages", () => {
     const payload = toWebhookPayload({
       key: { ...privateKey, fromMe: true },

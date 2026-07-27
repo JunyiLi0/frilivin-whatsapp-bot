@@ -7,6 +7,7 @@ import pytest
 from whatsapp_bot.processing.jids import display_name, normalise_jid, resolve_jid
 
 GROUP_ID = "120363000000000000"
+LID = "118141732556813@lid"
 
 
 class TestResolveJid:
@@ -41,7 +42,7 @@ class TestResolveJid:
 
     @pytest.mark.parametrize(
         "written",
-        [f"{GROUP_ID}@g.us", "33612345678@s.whatsapp.net"],
+        [f"{GROUP_ID}@g.us", "33612345678@s.whatsapp.net", LID],
     )
     def test_explicit_jids_pass_through(self, written: str) -> None:
         assert resolve_jid(written) == written
@@ -53,7 +54,7 @@ class TestResolveJid:
             "   ",
             "toto",
             "1234567",  # too short to be a phone number
-            "33612345678@lid",  # domain we do not know
+            "33612345678@newsletter",  # domain we do not know
             "status@broadcast",
             "+33 abc 45",
         ],
@@ -72,6 +73,10 @@ class TestNormaliseJid:
     def test_leaves_a_plain_jid_alone(self) -> None:
         assert normalise_jid(f"{GROUP_ID}@g.us") == f"{GROUP_ID}@g.us"
 
+    def test_accepts_a_lid(self) -> None:
+        """So an operator can be allowlisted by LID when no phone number is sent."""
+        assert normalise_jid(LID) == LID
+
     @pytest.mark.parametrize("written", ["", "   ", "@s.whatsapp.net", "33612345678@"])
     def test_rejects_nonsense(self, written: str) -> None:
         assert normalise_jid(written) is None
@@ -83,6 +88,10 @@ class TestDisplayName:
 
     def test_leaves_a_group_id_bare(self) -> None:
         assert display_name(f"{GROUP_ID}@g.us") == GROUP_ID
+
+    def test_leaves_a_lid_bare(self) -> None:
+        """A LID is numeric but is not a phone number — no "+" in front."""
+        assert display_name(LID) == "118141732556813"
 
     def test_ignores_the_device_part(self) -> None:
         assert display_name("33612345678:12@s.whatsapp.net") == "+33612345678"
