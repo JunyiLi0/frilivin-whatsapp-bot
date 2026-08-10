@@ -30,10 +30,12 @@ export function createApp({ config, logger, wa, outbox, api }) {
     return next();
   };
 
-  // Unauthenticated: this is what Docker's healthcheck calls.
+  // Unauthenticated: this is what Docker's healthcheck calls. A disconnected
+  // bridge answers 503 on purpose — a 200 carrying "degraded" reads as healthy
+  // everywhere it matters, which is how a twelve-day outage went unnoticed.
   app.get("/health", (_req, res) => {
     const status = wa.status();
-    res.json({
+    res.status(status.connected ? 200 : 503).json({
       status: status.connected ? "ok" : "degraded",
       ...status,
       queued: outbox.size,

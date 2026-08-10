@@ -10,6 +10,7 @@ export
 
 COMPOSE ?= docker compose
 API ?= http://127.0.0.1:$(or $(API_PORT),8000)
+BRIDGE ?= http://127.0.0.1:$(or $(BRIDGE_PORT),3000)
 AUTH := -H "X-Bot-Token: $(BOT_TOKEN)"
 
 help: ## Affiche cette aide
@@ -45,8 +46,15 @@ qr: ## Affiche le QR code à scanner (premier démarrage)
 
 # --- Exploitation -----------------------------------------------------------
 
-health: ## Vérifie l'état de l'api et du bridge
+health: ## Vérifie l'état de l'api, de redis et du bridge
+	@echo "--- api + redis ---"
 	@curl -fsS $(API)/health | python3 -m json.tool
+	@echo "--- bridge (connexion WhatsApp) ---"
+	@answer=$$(curl -sS -w '\n%{http_code}' $(BRIDGE)/health); \
+	code=$$(printf '%s' "$$answer" | tail -n1); \
+	printf '%s' "$$answer" | sed '$$d' | python3 -m json.tool; \
+	test "$$code" = "200" \
+		|| { echo "→ bridge DÉGRADÉ (HTTP $$code) : WhatsApp est déconnecté"; exit 1; }
 
 groups: ## Liste les groupes WhatsApp et leurs JID
 	@curl -fsS $(AUTH) $(API)/groups | python3 -m json.tool

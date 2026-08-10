@@ -61,7 +61,16 @@ Chacun a coûté un aller-retour ou un bug ; ils sont tous couverts par des test
    ses propres envois et boucle.
 6. **`run_pipeline` n'estampille `handler` que sur les `Outbound` *retournés*.**
    Un handler qui appelle `ctx.send()` directement doit le renseigner lui-même.
-7. **Les exports Sage ne sont jamais versionnés** (`sage-data/` gitignoré) : ils
+7. **Le watchdog du bridge relance la connexion, il ne fait pas que la
+   constater.** `superviseAction` (`wa.js`) lit « pas connecté + aucune
+   tentative en vol + aucun timer en attente » comme *chaîne morte* et relance.
+   Le drapeau `#connecting` est ce qui empêche une relance de doubler un socket
+   en cours de construction : ne pas le retirer.
+8. **`/health` du bridge renvoie 503 quand WhatsApp est déconnecté.** Un 200
+   portant `degraded` passe pour sain partout où ça compte (Docker, `curl -f`,
+   `make health`). Rien ne dépend du bridge en `service_healthy`, donc ce 503
+   ne bloque aucun démarrage — vérifié.
+9. **Les exports Sage ne sont jamais versionnés** (`sage-data/` gitignoré) : ils
    contiennent 5 441 clients réels avec adresses et numéros de TVA. Les fixtures
    de test sont synthétiques (`app/tests/sage_fixtures.py`).
 
@@ -142,7 +151,11 @@ make backup         # wa_session + base
 ```
 
 `make check` = ruff + ruff format + mypy strict + pytest (**195**) + eslint +
-`node --test` (**72**). Tout doit rester vert.
+`node --test` (**87**). Tout doit rester vert.
+
+`make health` interroge désormais **l'api *et* le bridge**, et sort en erreur si
+la connexion WhatsApp est tombée. Avant, il ne curlait que l'api, malgré ce que
+promettait cette page.
 
 Attention : `make health` interroge `127.0.0.1`. Depuis un poste local il faut un
 tunnel : `ssh -L 8000:127.0.0.1:8000 bot@167.233.137.207`.
@@ -175,6 +188,23 @@ tunnel : `ssh -L 8000:127.0.0.1:8000 bot@167.233.137.207`.
   `application/octet-stream` arrive en `.bin`, inouvrable. `mimetypeFor()`
   (`wa.js`) déduit le type de l'extension ; une extension absente de la table
   retombe sur octet-stream et reproduira le symptôme.
+- **Bot muet alors que `docker compose ps` affiche tout en `healthy`** : arrivé
+  le 2026-07-28, découvert **12 jours plus tard**. WhatsApp a refusé le socket
+  (`503` puis `405` en rafale), le bridge a retenté 5 fois, puis la chaîne de
+  reconnexion s'est arrêtée sans un mot — ni `wa_reconnecting`, ni erreur, ni
+  `wa_logged_out`. Le process est resté vivant et totalement inerte : aucun
+  socket sortant, threadpool libuv au repos. Deux choses ont été corrigées :
+  le watchdog relance maintenant la chaîne (§3.7) et `/health` renvoie 503
+  (§3.8). **Ne pas croire le healthcheck Docker seul** : `restart:
+  unless-stopped` ne réagit qu'à la *sortie du process*, jamais à l'état
+  `unhealthy`. C'est pourquoi le filet de sécurité est une sortie volontaire
+  (`BRIDGE_DISCONNECT_EXIT_MS`, 15 min) et pas un simple 503.
+- **Limite connue du superviseur** : si un socket se construisait sans jamais
+  émettre ni `open` ni `close`, le watchdog en créerait un neuf toutes les 45 s
+  jusqu'à la sortie — soit ~20 sockets au pire. Borné par
+  `BRIDGE_DISCONNECT_EXIT_MS`, jugé acceptable. La vraie parade serait de
+  détruire l'ancien socket avant d'en ouvrir un autre, ce qui demande de
+  simuler Baileys pour être testé.
 - **Exports Sage intervertis** : `sage-data/clients.txt` contenait en fait
   l'export *articles* (déposé sous le mauvais nom). L'import échoue alors sur la
   résolution des clients. Contrôle rapide : l'en-tête de `clients.txt` commence

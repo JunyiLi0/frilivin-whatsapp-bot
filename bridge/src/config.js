@@ -64,5 +64,10 @@ export function loadConfig(env = process.env) {
     // Retries for one webhook delivery before it goes to the pending buffer.
     webhookAttempts: int(env.WEBHOOK_ATTEMPTS, 3),
     webhookTimeoutMs: int(env.WEBHOOK_TIMEOUT_MS, 5000),
+    // How long the bridge may stay disconnected before it exits and lets
+    // Docker recreate it. 0 disables the exit and keeps only the in-process
+    // retries — the escape hatch if a long WhatsApp block ever turned this
+    // into a restart loop.
+    disconnectExitMs: int(env.BRIDGE_DISCONNECT_EXIT_MS, 900_000),
   };
 }

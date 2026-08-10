@@ -93,6 +93,70 @@ export function connectionHint({ connected, loggedOut, sawQr }) {
   );
 }
 
+/**
+ * What the watchdog must do about the connection, given what it can observe.
+ *
+ * The reconnect chain can die without a trace: on 2026-07-28 WhatsApp refused
+ * the socket five times in a row, and the sixth attempt never reported
+ * anything — no timer left pending, no attempt in flight, no error. The bridge
+ * sat there for twelve days. "Nothing pending and not connected" is precisely
+ * that corpse, and the only honest reading is to start the chain over.
+ *
+ * @returns "none" | "reconnect" | "exit"
+ */
+export function superviseAction({
+  connected,
+  loggedOut,
+  connecting,
+  reconnectPending,
+  disconnectedSince,
+  now,
+  exitAfterMs,
+}) {
+  if (connected) return "none";
+  // A revoked session survives no restart: it needs a human and a fresh QR.
+  if (loggedOut) return "none";
+  // Acting now would stack a second socket on the one already being built.
+  if (connecting || reconnectPending) return "none";
+
+  const outageMs = disconnectedSince === null ? 0 : now - disconnectedSince;
+  if (exitAfterMs > 0 && outageMs >= exitAfterMs) return "exit";
+
+  return "reconnect";
+}
+
+/**
+ * One watchdog tick: report the state, then act on it.
+ *
+ * Kept free of Baileys and of timers so the recovery rules can be exercised
+ * directly. `exit` is injected for the same reason — a test must not be able
+ * to take the runner down with it.
+ */
+export function runSupervision({ state, log, reconnect, exit }) {
+  const hint = connectionHint(state);
+  if (hint) log.warn({ event: "wa_not_connected", hint });
+
+  const action = superviseAction(state);
+
+  if (action === "reconnect") {
+    log.warn({
+      event: "wa_reconnect_forced",
+      hint: "Aucune tentative en cours alors que la connexion est morte : relance du cycle.",
+    });
+    reconnect();
+    return;
+  }
+
+  if (action === "exit") {
+    log.fatal({
+      event: "wa_supervisor_exit",
+      disconnected_ms: state.now - state.disconnectedSince,
+      hint: "Déconnecté trop longtemps : sortie pour que Docker recrée le conteneur.",
+    });
+    exit(1);
+  }
+}
+
 export class WhatsAppClient {
   #config;
   #log;
@@ -108,12 +172,18 @@ export class WhatsAppClient {
   #me = null;
   #sawQr = false;
   #watchdog = null;
+  #connecting = false;
+  #disconnectedSince = null;
+  #now;
+  #exit;
 
-  constructor({ config, logger, api }) {
+  constructor({ config, logger, api, now = () => Date.now(), exit = (code) => process.exit(code) }) {
     this.#config = config;
     this.#log = logger;
     this.#api = api;
     this.#quoted = new LruCache(config.quotedCacheSize);
+    this.#now = now;
+    this.#exit = exit;
   }
 
   get connected() {
@@ -132,24 +202,51 @@ export class WhatsAppClient {
 
   async start() {
     await mkdir(this.#config.sessionDir, { recursive: true });
+    this.#disconnectedSince = this.#now();
     await this.#connect();
     this.#startWatchdog();
+  }
+
+  /** The connection state the supervisor reasons about. */
+  #supervisionState() {
+    return {
+      connected: this.#connected,
+      loggedOut: this.#loggedOut,
+      sawQr: this.#sawQr,
+      connecting: this.#connecting,
+      reconnectPending: this.#reconnectTimer !== null,
+      disconnectedSince: this.#disconnectedSince,
+      now: this.#now(),
+      exitAfterMs: this.#config.disconnectExitMs,
+    };
   }
 
   #startWatchdog(intervalMs = WATCHDOG_INTERVAL_MS) {
     if (this.#watchdog) return;
     this.#watchdog = setInterval(() => {
-      const hint = connectionHint({
-        connected: this.#connected,
-        loggedOut: this.#loggedOut,
-        sawQr: this.#sawQr,
+      if (this.#stopped) return;
+      runSupervision({
+        state: this.#supervisionState(),
+        log: this.#log,
+        reconnect: () => this.#scheduleReconnect(null),
+        exit: (code) => this.#exit(code),
       });
-      if (hint) this.#log.warn({ event: "wa_not_connected", hint });
     }, intervalMs);
     this.#watchdog.unref?.();
   }
 
   async #connect() {
+    // Held until the socket exists and its listeners are attached: a watchdog
+    // tick landing inside this window would build a second, rival socket.
+    this.#connecting = true;
+    try {
+      await this.#openSocket();
+    } finally {
+      this.#connecting = false;
+    }
+  }
+
+  async #openSocket() {
     const { state, saveCreds } = await useMultiFileAuthState(this.#config.sessionDir);
     this.#saveCreds = saveCreds;
 
@@ -204,6 +301,7 @@ export class WhatsAppClient {
       this.#connected = true;
       this.#loggedOut = false;
       this.#reconnectAttempts = 0;
+      this.#disconnectedSince = null;
       this.#me = this.#sock?.user?.id ?? null;
       this.#log.info({ event: "wa_connected", user: this.#me });
       return;
@@ -211,6 +309,9 @@ export class WhatsAppClient {
 
     if (connection === "close") {
       this.#connected = false;
+      // Kept from the first close, so the exit deadline measures the whole
+      // outage rather than restarting at every failed attempt.
+      this.#disconnectedSince ??= this.#now();
       const statusCode = lastDisconnect?.error?.output?.statusCode;
 
       if (statusCode === DisconnectReason.loggedOut) {
