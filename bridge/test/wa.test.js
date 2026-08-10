@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { connectionHint, runSupervision, superviseAction } from "../src/wa.js";
+import {
+  connectionHint,
+  onUpgradeRefused,
+  runSupervision,
+  superviseAction,
+} from "../src/wa.js";
 
 // A connection that went down at t=1000, observed 45s later (one watchdog tick).
 const DOWN_AT = 1000;
@@ -150,5 +155,32 @@ describe("runSupervision", () => {
 
     assert.deepEqual(calls, []);
     assert.ok(log.events.some((e) => e.event === "wa_not_connected"));
+  });
+});
+
+describe("onUpgradeRefused", () => {
+  it("reports the refused status and closes the socket itself", () => {
+    // Baileys listens for 'unexpected-response' — which suppresses the 'error'
+    // ws would otherwise emit — then never acts on it, so WhatsApp's 405 left
+    // the socket in CONNECTING and the reconnect chain dead for twelve days.
+    const log = recorder();
+    const ended = [];
+
+    onUpgradeRefused({ response: { statusCode: 405 }, log, end: (err) => ended.push(err) });
+
+    const record = log.events.find((e) => e.event === "wa_upgrade_refused");
+    assert.equal(record.status, 405);
+    assert.equal(ended.length, 1);
+    assert.match(ended[0].message, /405/);
+  });
+
+  it("still closes the socket when the refusal carries no status", () => {
+    const log = recorder();
+    const ended = [];
+
+    onUpgradeRefused({ response: undefined, log, end: (err) => ended.push(err) });
+
+    assert.equal(log.events.find((e) => e.event === "wa_upgrade_refused").status, null);
+    assert.equal(ended.length, 1);
   });
 });

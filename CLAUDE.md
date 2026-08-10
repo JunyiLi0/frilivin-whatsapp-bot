@@ -151,7 +151,7 @@ make backup         # wa_session + base
 ```
 
 `make check` = ruff + ruff format + mypy strict + pytest (**195**) + eslint +
-`node --test` (**87**). Tout doit rester vert.
+`node --test` (**89**). Tout doit rester vert.
 
 `make health` interroge désormais **l'api *et* le bridge**, et sort en erreur si
 la connexion WhatsApp est tombée. Avant, il ne curlait que l'api, malgré ce que
@@ -199,12 +199,21 @@ tunnel : `ssh -L 8000:127.0.0.1:8000 bot@167.233.137.207`.
   unless-stopped` ne réagit qu'à la *sortie du process*, jamais à l'état
   `unhealthy`. C'est pourquoi le filet de sécurité est une sortie volontaire
   (`BRIDGE_DISCONNECT_EXIT_MS`, 15 min) et pas un simple 503.
-- **Limite connue du superviseur** : si un socket se construisait sans jamais
-  émettre ni `open` ni `close`, le watchdog en créerait un neuf toutes les 45 s
-  jusqu'à la sortie — soit ~20 sockets au pire. Borné par
-  `BRIDGE_DISCONNECT_EXIT_MS`, jugé acceptable. La vraie parade serait de
-  détruire l'ancien socket avant d'en ouvrir un autre, ce qui demande de
-  simuler Baileys pour être testé.
+- **La cause exacte de cette panne est un bug de Baileys 6.7.23**, reproduit et
+  corrigé côté bridge. `ws` n'émet `error` sur un upgrade refusé *que si*
+  personne n'écoute `unexpected-response`. Or `Socket/Client/websocket.js`
+  réémet cet événement — ce qui supprime l'`error` — et `Socket/socket.js` ne
+  câble `end()` que sur `error` et `close`. Un 405 de WhatsApp n'atterrit donc
+  **nulle part** : socket bloqué en `CONNECTING`, plus aucun
+  `connection.update`, chaîne de reconnexion morte. `handshakeTimeout` ne sert à
+  rien ici : le serveur a répondu, simplement 405. `onUpgradeRefused` (`wa.js`)
+  écoute l'événement orphelin et appelle `end()` nous-mêmes. **Ne pas retirer
+  cet écouteur en montant de version sans revérifier** que le bug amont est
+  corrigé — reproduction : un serveur local qui répond 405 à l'upgrade.
+- **Deux défenses, pas une** : `onUpgradeRefused` traite la cause connue et
+  rend la main en quelques millisecondes ; le superviseur (§3.7) rattrape en
+  45 s *n'importe quelle* autre façon dont la chaîne pourrait mourir. Garder les
+  deux : la seconde ne suppose rien de la cause.
 - **Exports Sage intervertis** : `sage-data/clients.txt` contenait en fait
   l'export *articles* (déposé sous le mauvais nom). L'import échoue alors sur la
   résolution des clients. Contrôle rapide : l'en-tête de `clients.txt` commence

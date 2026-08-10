@@ -157,6 +157,30 @@ export function runSupervision({ state, log, reconnect, exit }) {
   }
 }
 
+/**
+ * A websocket upgrade WhatsApp refused — its 405 during a temporary block.
+ *
+ * Baileys never surfaces this. Its client registers an 'unexpected-response'
+ * listener (Socket/Client/websocket.js), which is exactly what makes `ws`
+ * suppress the 'error' event it would otherwise emit, and then wires end()
+ * only to 'error' and 'close' (Socket/socket.js). A refused upgrade therefore
+ * lands nowhere: the socket stays CONNECTING for good, connection.update never
+ * fires again, and the reconnect chain dies without a word. Verified against
+ * 6.7.23 with a local server answering 405.
+ *
+ * `handshakeTimeout` does not save us either — the server answered, it just
+ * answered 405, so there is no timeout left to fire.
+ */
+export function onUpgradeRefused({ response, log, end }) {
+  const status = response?.statusCode ?? null;
+  log.warn({
+    event: "wa_upgrade_refused",
+    status,
+    hint: "WhatsApp a refusé l'ouverture du websocket ; fermeture forcée pour relancer le cycle.",
+  });
+  end(new Error(`WebSocket upgrade refused (HTTP ${status})`));
+}
+
 export class WhatsAppClient {
   #config;
   #log;
@@ -279,6 +303,15 @@ export class WhatsAppClient {
 
     this.#sock.ev.on("creds.update", saveCreds);
     this.#sock.ev.on("connection.update", (update) => this.#onConnectionUpdate(update));
+    // Baileys intercepts this event and then drops it; without this listener a
+    // refused upgrade is never reported and the reconnect chain simply stops.
+    this.#sock.ws?.on?.("unexpected-response", (_request, response) => {
+      onUpgradeRefused({
+        response,
+        log: this.#log,
+        end: (err) => this.#sock?.end?.(err),
+      });
+    });
     this.#sock.ev.on("messages.upsert", (event) => {
       this.#onMessages(event).catch((err) =>
         this.#log.error({ event: "inbound_handling_failed", error: String(err?.message ?? err) }),
